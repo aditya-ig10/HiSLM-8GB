@@ -1,224 +1,393 @@
+"""
+client.py — Run on Jetson Orin NX (8GB)
+=========================================
+Child node. Connects to AGX server over LAN.
+
+Two modes:
+  1. GUI mode (default):  opens the web UI in the browser
+  2. CLI mode (--cli):    terminal chat, no browser required
+
+Usage:
+  # GUI (open browser on NX):
+  python client.py --agx-ip 172.16.6.21
+
+  # Headless / terminal mode:
+  python client.py --agx-ip 172.16.6.21 --cli --name nx-node-1
+
+  # Custom port:
+  python client.py --agx-ip 172.16.6.21 --port 8001
+
+The GUI is served from the AGX itself — client.py in GUI mode just
+opens http://<AGX_IP>:<PORT>/?client_id=<name> in the local browser.
+"""
+
 import argparse
-import random
+import asyncio
+import json
+import logging
+import sys
+import threading
 import time
-from typing import Any, Dict, Optional
+import webbrowser
+from datetime import datetime, timezone
 
 import requests
+import websocket   # websocket-client (sync)
 
+# ─────────────────────────────────────────────
+# Logging setup
+# ─────────────────────────────────────────────
+LOG_FORMAT = "%(asctime)s  [%(levelname)-8s]  %(name)s — %(message)s"
+logging.basicConfig(
+    level=logging.DEBUG,
+    format=LOG_FORMAT,
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("client.log", mode="a"),
+    ],
+)
+log = logging.getLogger("NX-CLIENT")
 
-def simulate_sensor_data(include_vibration: bool = True) -> Dict[str, Any]:
-    temperature = round(random.uniform(35.0, 55.0), 1)
-    gas_level = random.choice(["low", "moderate", "high methane"])
+# ─────────────────────────────────────────────
+# REST helpers (fallback / health check)
+# ─────────────────────────────────────────────
 
-    sensor_data: Dict[str, Any] = {
-        "temperature": temperature,
-        "gas_level": gas_level,
-    }
-
-    if include_vibration:
-        sensor_data["vibration"] = random.choice(["normal", "elevated", "severe"])
-
-    return sensor_data
-
-
-def build_prompt(sensor_data: Dict[str, Any]) -> str:
-    temperature = sensor_data.get("temperature", "unknown")
-    gas_level = sensor_data.get("gas_level", "unknown")
-    vibration = sensor_data.get("vibration")
-
-    prompt = (
-        f"Given the following mining sensor data: temperature={temperature}°C, "
-        f"gas={gas_level}"
-    )
-    if vibration is not None:
-        prompt += f", vibration={vibration}"
-    prompt += ", what risk does this indicate? Be concise."
-    return prompt
-
-
-def call_api(
-    server_url: str,
-    payload: Dict[str, Any],
-    result_base_url: str,
-    submit_timeout: float = 15.0,    # FIX 4: was 10s — enough for HTTP submit, not inference
-    poll_timeout: float = 30.0,      # FIX 4: poll GETs need their own timeout
-    max_attempts: int = 3,
-    poll_interval: float = 3.0,      # FIX 4: was 2s — 3s is fine, avoids hammering server
-    poll_max_attempts: int = 100,    # 100 x 3s = 5 min max wait — enough for 256 tokens @ 31 t/s
-) -> Dict[str, Any]:
-    total_start = time.perf_counter()
-
-    # ── Phase 1: submit query, get task_id ──────────────────────────────────
-    task_id: Optional[str] = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            response = requests.post(
-                server_url,
-                json=payload,
-                timeout=submit_timeout,   # FIX 4: separate submit timeout
-            )
-            response.raise_for_status()
-            data = response.json()
-            if data.get("status") == "ok" and "task_id" in data:
-                task_id = data["task_id"]
-                break
-            raise ValueError(f"unexpected response: {data}")
-        except (requests.Timeout, requests.ConnectionError, requests.HTTPError, ValueError) as e:
-            if attempt < max_attempts:
-                backoff = 2 ** (attempt - 1)
-                print(f"  [submit] attempt {attempt} failed: {e}. Retrying in {backoff}s...")
-                time.sleep(backoff)
-            else:
-                return {
-                    "ok": False,
-                    "error": str(e),
-                    "round_trip_time": time.perf_counter() - total_start,
-                }
-
-    if task_id is None:
-        return {
-            "ok": False,
-            "error": "failed to submit query",
-            "round_trip_time": time.perf_counter() - total_start,
-        }
-
-    print(f"  [submit] task_id={task_id}")
-
-    # ── Phase 2: poll for result ─────────────────────────────────────────────
-    result_url = f"{result_base_url}/{task_id}"
-    for attempt in range(1, poll_max_attempts + 1):
-        try:
-            response = requests.get(
-                result_url,
-                timeout=poll_timeout,    # FIX 4: separate poll timeout (just a GET, 30s is plenty)
-            )
-            response.raise_for_status()
-            data = response.json()
-            status = data.get("status")
-            elapsed = time.perf_counter() - total_start
-
-            if status == "completed":
-                return {
-                    "ok": True,
-                    "model_response": data.get("response", ""),
-                    "latency_ms": data.get("latency_ms"),
-                    "round_trip_time": elapsed,
-                }
-            elif status == "failed":
-                return {
-                    "ok": False,
-                    "error": data.get("error", "inference failed"),
-                    "round_trip_time": elapsed,
-                }
-
-            # still running / queued
-            print(f"  [poll #{attempt}] status={status}, elapsed={elapsed:.1f}s")
-            time.sleep(poll_interval)
-
-        except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
-            if attempt < poll_max_attempts:
-                backoff = min(2 ** (attempt - 1), 10)
-                print(f"  [poll] attempt {attempt} failed: {e}. Retrying in {backoff}s...")
-                time.sleep(backoff)
-            else:
-                return {
-                    "ok": False,
-                    "error": str(e),
-                    "round_trip_time": time.perf_counter() - total_start,
-                }
-
-    return {
-        "ok": False,
-        "error": "timed out waiting for result",
-        "round_trip_time": time.perf_counter() - total_start,
-    }
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="HiSLM NX client — sends mining sensor prompts to AGX Orin FastAPI server."
-    )
-    parser.add_argument(
-        "--agx-ip",
-        required=True,
-        help="IP address of the AGX Orin running the FastAPI server.",
-    )
-    parser.add_argument(
-        "--endpoint",
-        default="/query",
-        help="API endpoint path. Default: /query",
-    )
-    parser.add_argument(
-        "--submit-timeout",
-        type=float,
-        default=15.0,
-        help="Timeout for the initial POST submit (seconds). Default: 15",
-    )
-    parser.add_argument(
-        "--poll-timeout",
-        type=float,
-        default=30.0,
-        help="Timeout for each poll GET (seconds). Default: 30",
-    )
-    parser.add_argument(
-        "--attempts",
-        type=int,
-        default=3,
-        help="Max submit retry attempts. Default: 3",
-    )
-    parser.add_argument(
-        "--no-vibration",
-        action="store_true",
-        help="Disable vibration in simulated sensor payload.",
-    )
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-    sensor_data = simulate_sensor_data(include_vibration=not args.no_vibration)
-    prompt = build_prompt(sensor_data)
-    base_url = f"http://{args.agx_ip}:8000"
-    server_url = f"{base_url}{args.endpoint}"
-    result_base_url = f"{base_url}/result"
-    payload = {"prompt": prompt, "sensor": sensor_data}
-
-    print("=== HiSLM Sensor Client (Orin NX) ===")
-    print(f"  AGX server : {base_url}")
-    print(f"  Prompt     : {prompt}")
-    print(f"  Sensor data: {sensor_data}")
-    print()
-
-    # Quick health check before sending inference request
+def check_health(base_url: str, timeout: int = 5) -> bool:
+    url = f"{base_url}/health"
+    log.info(f"[HEALTH CHECK] GET {url}")
     try:
-        h = requests.get(f"{base_url}/health", timeout=5)
-        health = h.json()
-        print(f"  Server health: {health}")
-        if health.get("status") != "ok":
-            print("  WARNING: server reports not_ready — model/binary path may be wrong on AGX")
-    except Exception as e:
-        print(f"  WARNING: health check failed: {e}")
-    print()
+        r = requests.get(url, timeout=timeout)
+        r.raise_for_status()
+        data = r.json()
+        log.info(f"[HEALTH OK] {data}")
+        return True
+    except requests.RequestException as exc:
+        log.error(f"[HEALTH FAIL] {exc}")
+        return False
 
-    result = call_api(
-        server_url=server_url,
-        payload=payload,
-        result_base_url=result_base_url,
-        submit_timeout=args.submit_timeout,
-        poll_timeout=args.poll_timeout,
-        max_attempts=args.attempts,
+
+def rest_send(base_url: str, sender: str, text: str) -> dict:
+    """Send via REST POST /send (fallback if WS unavailable)."""
+    url = f"{base_url}/send"
+    payload = {"sender": sender, "text": text}
+    log.info(f"[REST SEND] POST {url}  payload={payload}")
+    r = requests.post(url, json=payload, timeout=15)
+    r.raise_for_status()
+    data = r.json()
+    log.info(f"[REST SEND OK] {data}")
+    return data
+
+
+def rest_get_messages(base_url: str, limit: int = 50) -> list:
+    url = f"{base_url}/messages?limit={limit}"
+    log.info(f"[REST GET] {url}")
+    r = requests.get(url, timeout=10)
+    r.raise_for_status()
+    return r.json().get("messages", [])
+
+
+# ─────────────────────────────────────────────
+# WebSocket CLI client
+# ─────────────────────────────────────────────
+
+class WSCliClient:
+    """
+    Synchronous WebSocket client for terminal use.
+    Receives messages in a background thread, sends from main thread.
+    """
+
+    def __init__(self, ws_url: str, client_name: str):
+        self.ws_url = ws_url
+        self.name = client_name
+        self._ws: websocket.WebSocketApp | None = None
+        self._connected = threading.Event()
+        self._stop = threading.Event()
+        self._recv_thread: threading.Thread | None = None
+
+    # ── callbacks ─────────────────────────────
+
+    def _on_open(self, ws):
+        log.info(f"[WS OPEN] connected to {self.ws_url}")
+        self._connected.set()
+
+    def _on_message(self, ws, raw: str):
+        log.debug(f"[WS RECV RAW] {raw[:200]!r}")
+        try:
+            frame = json.loads(raw)
+        except json.JSONDecodeError:
+            log.warning("[WS RECV] invalid JSON, skipping")
+            return
+
+        ftype = frame.get("type", "")
+
+        if ftype == "connected":
+            print(f"\n✓ Connected as [{frame.get('client_id')}] on {frame.get('node')}\n")
+
+        elif ftype == "history":
+            msgs = frame.get("payload", [])
+            log.info(f"[WS HISTORY] received {len(msgs)} messages")
+            if msgs:
+                print("\n── Message History ──")
+                for m in msgs[-20:]:   # show last 20
+                    self._print_msg(m)
+                print("── End History ──\n")
+
+        elif ftype == "message":
+            msg = frame.get("payload", {})
+            self._print_msg(msg)
+
+        elif ftype == "ack":
+            log.debug(f"[WS ACK] id={frame.get('id')}")
+
+        elif ftype == "pong":
+            log.debug("[WS PONG]")
+
+        elif ftype == "error":
+            log.warning(f"[WS SERVER ERROR] {frame.get('detail')}")
+            print(f"\n⚠ Server error: {frame.get('detail')}\n")
+
+    def _on_error(self, ws, error):
+        log.error(f"[WS ERROR] {error}")
+        print(f"\n⚠ WebSocket error: {error}\n")
+
+    def _on_close(self, ws, code, msg):
+        log.info(f"[WS CLOSE] code={code} msg={msg}")
+        self._connected.clear()
+        self._stop.set()
+        print("\n[disconnected from server]\n")
+
+    # ── helpers ───────────────────────────────
+
+    @staticmethod
+    def _print_msg(msg: dict):
+        if msg.get("role") == "system":
+            print(f"  ·  {msg.get('text', '')}")
+            return
+        ts = msg.get("timestamp", "")[:19].replace("T", " ")
+        sender = msg.get("sender", "?")
+        text = msg.get("text", "")
+        role_tag = "[AGX]" if msg.get("role") == "server" else "[NX] "
+        print(f"  {ts}  {role_tag}  {sender}: {text}")
+
+    def _send_frame(self, frame: dict):
+        if self._ws and self._connected.is_set():
+            raw = json.dumps(frame)
+            self._ws.send(raw)
+            log.debug(f"[WS SENT] {raw[:120]!r}")
+        else:
+            log.warning("[WS SEND] not connected, dropping message")
+
+    # ── lifecycle ─────────────────────────────
+
+    def _run_ws(self):
+        self._ws = websocket.WebSocketApp(
+            self.ws_url,
+            on_open=self._on_open,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close,
+        )
+        log.info(f"[WS] Starting connection to {self.ws_url}")
+        self._ws.run_forever(
+            ping_interval=20,
+            ping_timeout=10,
+        )
+
+    def connect(self, timeout: int = 10) -> bool:
+        self._recv_thread = threading.Thread(target=self._run_ws, daemon=True)
+        self._recv_thread.start()
+        ok = self._connected.wait(timeout=timeout)
+        if not ok:
+            log.error(f"[WS] Connection timed out after {timeout}s")
+        return ok
+
+    def send(self, text: str):
+        frame = {
+            "type": "message",
+            "sender": self.name,
+            "text": text,
+        }
+        self._send_frame(frame)
+        log.info(f"[SEND] sender={self.name!r}  text={text[:80]!r}")
+
+    def ping(self):
+        self._send_frame({"type": "ping"})
+
+    def close(self):
+        self._stop.set()
+        if self._ws:
+            self._ws.close()
+        log.info("[WS] Closed by client")
+
+    def run_cli(self):
+        """Blocking REPL — type messages, Ctrl-C to quit."""
+        print("\n─────────────────────────────────────────")
+        print("  HiSLM NX → AGX Messenger  (CLI mode)")
+        print("  Type a message and press Enter to send.")
+        print("  Ctrl-C to quit.")
+        print("─────────────────────────────────────────\n")
+
+        # Keepalive ping thread
+        def _pinger():
+            while not self._stop.is_set():
+                time.sleep(15)
+                if self._connected.is_set():
+                    self.ping()
+
+        threading.Thread(target=_pinger, daemon=True).start()
+
+        try:
+            while not self._stop.is_set():
+                try:
+                    line = input(f"[{self.name}] > ")
+                except EOFError:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                if line.lower() in ("/quit", "/exit", "/q"):
+                    break
+                if line.lower() == "/ping":
+                    self.ping()
+                    continue
+                self.send(line)
+        except KeyboardInterrupt:
+            print("\nInterrupted.")
+        finally:
+            self.close()
+
+
+# ─────────────────────────────────────────────
+# GUI mode helper
+# ─────────────────────────────────────────────
+
+def open_browser_ui(base_url: str, client_id: str):
+    """
+    In GUI mode the server already hosts the full chat UI.
+    We just open it in the local browser with client_id baked in.
+    """
+    url = f"{base_url}/?client_id={client_id}"
+    log.info(f"[GUI] Opening browser: {url}")
+    print(f"\n  Opening UI at: {url}")
+    print("  If browser doesn't open, paste the URL manually.\n")
+    webbrowser.open(url)
+
+
+# ─────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="HiSLM NX client — connects to AGX server"
     )
+    p.add_argument("--agx-ip", required=True,
+                   help="IP address of the AGX Orin (e.g. 172.16.6.21)")
+    p.add_argument("--port", type=int, default=8000,
+                   help="Server port (default: 8000)")
+    p.add_argument("--name", default="nx-node",
+                   help="Client identifier shown in chat (default: nx-node)")
+    p.add_argument("--cli", action="store_true",
+                   help="Run in terminal mode instead of opening browser UI")
+    return p.parse_args()
 
-    print("=== Result ===")
-    if result["ok"]:
-        print(f"  Status          : success")
-        print(f"  Model response  : {result['model_response']}")
-        print(f"  Server latency  : {result.get('latency_ms', 'n/a')} ms")
-        print(f"  Client RTT      : {result['round_trip_time']:.3f}s")
+
+def main():
+    args = parse_args()
+    base_url = f"http://{args.agx_ip}:{args.port}"
+    ws_url   = f"ws://{args.agx_ip}:{args.port}/ws?client_id={args.name}"
+
+    log.info("=" * 60)
+    log.info("  HiSLM Node Messenger — NX Client")
+    log.info(f"  AGX server  : {base_url}")
+    log.info(f"  WebSocket   : {ws_url}")
+    log.info(f"  Client name : {args.name}")
+    log.info(f"  Mode        : {'CLI' if args.cli else 'GUI (browser)'}")
+    log.info("=" * 60)
+
+    # Health check first
+    print(f"\n  Checking AGX server at {base_url}…")
+    if not check_health(base_url):
+        log.critical("[STARTUP] AGX server unreachable. Aborting.")
+        print("\n✗ Cannot reach AGX server.")
+        print(f"  Make sure server.py is running on {args.agx_ip}:{args.port}")
+        print("  and both devices are on the same LAN.\n")
+        sys.exit(1)
+    print("  ✓ AGX server is online\n")
+
+    if args.cli:
+        # ── Terminal mode ─────────────────────
+        client = WSCliClient(ws_url=ws_url, client_name=args.name)
+        print(f"  Connecting WebSocket to {ws_url}…")
+        if not client.connect(timeout=10):
+            log.error("[STARTUP] WebSocket connection failed, falling back to REST poll")
+            print("\n  WebSocket failed — falling back to REST polling mode.\n")
+            _rest_cli_loop(base_url=base_url, name=args.name)
+        else:
+            client.run_cli()
     else:
-        print(f"  Status : FAILED")
-        print(f"  Error  : {result['error']}")
-        print(f"  RTT    : {result['round_trip_time']:.3f}s")
+        # ── GUI mode — just open the browser ──
+        open_browser_ui(base_url, client_id=args.name)
+        print("  Server is handling the UI. Keep this terminal open or close it.")
+        print("  Ctrl-C to exit.\n")
+        try:
+            while True:
+                time.sleep(60)
+        except KeyboardInterrupt:
+            pass
+
+
+def _rest_cli_loop(base_url: str, name: str):
+    """
+    REST-only fallback: poll /messages every 3s, send via POST /send.
+    Used when WebSocket is unavailable.
+    """
+    log.info("[REST FALLBACK] entering REST CLI loop")
+    print("\n─── REST Fallback Mode ────────────────────")
+    print("  WebSocket unavailable. Using REST polling.")
+    print("  Type a message and Enter to send. Ctrl-C to quit.\n")
+
+    seen_ids: set = set()
+    last_fetch = 0.0
+    POLL_INTERVAL = 3.0
+
+    def _poll():
+        nonlocal last_fetch
+        now = time.time()
+        if now - last_fetch < POLL_INTERVAL:
+            return
+        last_fetch = now
+        try:
+            msgs = rest_get_messages(base_url, limit=50)
+            for m in msgs:
+                mid = m.get("id", "")
+                if mid not in seen_ids:
+                    seen_ids.add(mid)
+                    ts = m.get("timestamp", "")[:19].replace("T", " ")
+                    sender = m.get("sender", "?")
+                    role_tag = "[AGX]" if m.get("role") == "server" else "[NX] "
+                    print(f"\r  {ts}  {role_tag}  {sender}: {m.get('text','')}")
+        except Exception as exc:
+            log.warning(f"[REST POLL] error: {exc}")
+
+    try:
+        while True:
+            _poll()
+            try:
+                text = input(f"[{name}] > ").strip()
+            except EOFError:
+                break
+            if not text:
+                continue
+            if text.lower() in ("/quit", "/exit", "/q"):
+                break
+            try:
+                rest_send(base_url, sender=name, text=text)
+            except Exception as exc:
+                print(f"  ✗ Send failed: {exc}")
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+    log.info("[REST FALLBACK] loop exited")
 
 
 if __name__ == "__main__":
