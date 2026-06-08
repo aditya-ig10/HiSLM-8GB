@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>HiSLM NX Wireless Client</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:        #080c10;
+    --bg2:       #0d1318;
+    --bg3:       #121a20;
+    --border:    #1e2d38;
+    --border-hi: #2a4050;
+    --accent:    #00c8ff;
+    --accent2:   #00ff9d;
+    --warn:      #ff6b35;
+    --dim:       #3a5060;
+    --text:      #c8dde8;
+    --text-hi:   #e8f4fa;
+    --text-dim:  #5a7888;
+    --agx-col:   #00ff9d;
+    --nx-col:    #00c8ff;
+    --sys-col:   #3a5060;
+    --font-mono: 'Share Tech Mono', monospace;
+    --font-ui:   'Rajdhani', sans-serif;
+    --r:         4px;
+    --glow:      0 0 12px rgba(0,200,255,0.25);
+    --glow2:     0 0 18px rgba(0,255,157,0.2);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.4;
+  }
+
+  #app {
+    display: grid;
+    grid-template-rows: 56px 1fr auto;
+    height: 100vh;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    z-index: 10;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .logo-mark {
+    width: 30px; height: 30px;
+    display: grid;
+    place-items: center;
+  }
+  .logo-mark svg { width: 100%; height: 100%; }
+
+  .title-block h1 {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+  .title-block p {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    letter-spacing: 0.08em;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .status-chips {
+    display: flex;
+    gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-dim);
+    transition: all .3s;
+  }
+  .chip.online  { border-color: var(--accent2); color: var(--accent2); }
+  .chip.offline { border-color: var(--warn);    color: var(--warn);    }
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: blink 2s infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  #node-id-display {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  #node-id-display span {
+    color: var(--accent);
+  }
+
+  #messages-wrap {
+    overflow: hidden;
+    position: relative;
+    background: var(--bg);
+  }
+
+  #messages-wrap::before,
+  #messages-wrap::after {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+    pointer-events: none;
+    z-index: 5;
+    border-top: 1px solid var(--border-hi);
+  }
+  #messages-wrap::before { top: 0; left: 0; border-left: 1px solid var(--border-hi); }
+  #messages-wrap::after { top: 0; right: 0; border-right: 1px solid var(--border-hi); }
+
+  #messages {
+    height: 100%;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    scroll-behavior: smooth;
+  }
+
+  #messages::-webkit-scrollbar { width: 4px; }
+  #messages::-webkit-scrollbar-track { background: var(--bg); }
+  #messages::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+  .msg-row {
+    display: flex;
+    flex-direction: column;
+    max-width: 72%;
+    animation: fadeUp .18s ease-out;
+  }
+  @keyframes fadeUp {
+    from { opacity:0; transform: translateY(6px); }
+    to   { opacity:1; transform: translateY(0); }
+  }
+
+  .msg-row.from-nx  { align-self: flex-start; }
+  .msg-row.from-agx { align-self: flex-end; }
+  .msg-row.from-system {
+    align-self: center;
+    max-width: 90%;
+    opacity: 0.5;
+  }
+
+  .msg-meta {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .msg-row.from-agx .msg-meta { justify-content: flex-end; }
+
+  .msg-sender { font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+  .from-agx .msg-sender { color: var(--agx-col); }
+  .from-nx  .msg-sender { color: var(--nx-col); }
+
+  .msg-bubble {
+    padding: 9px 13px;
+    border-radius: var(--r);
+    font-size: 14px;
+    line-height: 1.55;
+    font-family: var(--font-ui);
+    font-weight: 500;
+    word-break: break-word;
+    position: relative;
+  }
+
+  .from-agx .msg-bubble {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-right: 2px solid var(--agx-col);
+    color: var(--text-hi);
+    box-shadow: 2px 0 8px rgba(0,255,157,0.08);
+  }
+  .from-nx .msg-bubble {
+    background: rgba(0,200,255,0.06);
+    border: 1px solid rgba(0,200,255,0.2);
+    border-left: 2px solid var(--nx-col);
+    color: var(--text-hi);
+    box-shadow: -2px 0 8px rgba(0,200,255,0.08);
+  }
+  .from-system .msg-bubble {
+    background: none;
+    border: none;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--sys-col);
+    padding: 2px 0;
+    letter-spacing: 0.06em;
+  }
+
+  .thinking-bubble .msg-bubble {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 56px;
+    padding: 10px 14px;
+  }
+  .thinking-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--agx-col);
+    opacity: 0.6;
+    animation: tdot 1.2s infinite ease-in-out;
+  }
+  .thinking-dot:nth-child(2) { animation-delay: .2s; }
+  .thinking-dot:nth-child(3) { animation-delay: .4s; }
+  @keyframes tdot {
+    0%,80%,100% { transform: scale(0.7); opacity: 0.35; }
+    40%         { transform: scale(1.15); opacity: 1; }
+  }
+  .thinking-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    margin-left: 4px;
+  }
+
+  #empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 10px;
+    opacity: 0.25;
+    pointer-events: none;
+  }
+  #empty-state .es-icon {
+    font-size: 32px;
+    font-family: var(--font-mono);
+    color: var(--accent);
+    letter-spacing: -4px;
+  }
+  #empty-state p {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  #input-bar {
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    position: relative;
+  }
+
+  #input-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  #input-wrap label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  #msg-input {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text-hi);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 8px 12px;
+    border-radius: var(--r);
+    resize: none;
+    outline: none;
+    min-height: 38px;
+    max-height: 120px;
+    line-height: 1.4;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  #msg-input:focus {
+    border-color: var(--accent);
+    box-shadow: var(--glow);
+  }
+  #msg-input::placeholder { color: var(--text-dim); }
+
+  #send-btn {
+    align-self: flex-end;
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 8px 16px;
+    border-radius: var(--r);
+    cursor: pointer;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transition: all .2s;
+    white-space: nowrap;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #send-btn:hover {
+    background: rgba(0,200,255,0.1);
+    box-shadow: var(--glow);
+  }
+  #send-btn:active { transform: scale(0.97); }
+  #send-btn:disabled {
+    border-color: var(--dim);
+    color: var(--dim);
+    cursor: not-allowed;
+  }
+
+  .key-hint {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    text-align: right;
+    margin-top: 3px;
+    letter-spacing: 0.06em;
+  }
+
+  #reconnect-bar {
+    display: none;
+    position: fixed;
+    top: 56px; left: 0; right: 0;
+    background: rgba(255,107,53,0.12);
+    border-bottom: 1px solid var(--warn);
+    padding: 6px 20px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--warn);
+    text-align: center;
+    z-index: 20;
+    animation: slideDown .2s ease;
+  }
+  #reconnect-bar.visible { display: block; }
+  @keyframes slideDown { from{transform:translateY(-100%)} to{transform:translateY(0)} }
+
+  #connect-status {
+    position: fixed; inset: 0;
+    background: rgba(8,12,16,0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(4px);
+  }
+  #connect-status.hidden { display: none; }
+
+  .status-box {
+    background: var(--bg2);
+    border: 1px solid var(--border-hi);
+    border-radius: 6px;
+    padding: 32px 36px;
+    width: 380px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), var(--glow);
+    animation: modalIn .25s ease-out;
+    text-align: center;
+  }
+  @keyframes modalIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+
+  .status-box h2 {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .status-box p {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    line-height: 1.5;
+  }
+  .status-box .info-line {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin: 4px 0;
+  }
+  .status-box .info-line span {
+    color: var(--accent);
+  }
+
+  .conn-spinner {
+    display: inline-block;
+    width: 24px; height: 24px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    margin: 16px 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .conn-error {
+    color: var(--warn);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    margin-top: 8px;
+  }
+  .conn-ok {
+    color: var(--accent2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .retry-btn {
+    margin-top: 14px;
+    background: rgba(0,200,255,0.08);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 8px 20px;
+    border-radius: var(--r);
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .retry-btn:hover {
+    background: rgba(0,200,255,0.18);
+    box-shadow: var(--glow);
+  }
+</style>
+</head>
+<body>
+
+<div id="connect-status">
+  <div class="status-box">
+    <h2>// NX Wireless Client</h2>
+    <p id="conn-message">Connecting to AGX over Tailscale…</p>
+    <div class="conn-spinner" id="conn-spinner"></div>
+    <div class="info-line">AGX: <span id="conn-agx-ip">—</span></div>
+    <div class="info-line">Node: <span id="conn-node-name">—</span></div>
+    <div class="conn-error hidden" id="conn-error"></div>
+    <button class="retry-btn hidden" id="retry-btn">↻ Retry</button>
+  </div>
+</div>
+
+<div id="reconnect-bar">⚠ Connection lost — reconnecting…</div>
+
+<div id="app">
+  <header>
+    <div class="header-left">
+      <div class="logo-mark">
+        <svg viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="1" width="28" height="28" rx="2" stroke="#1e2d38" stroke-width="1"/>
+          <path d="M6 15 L12 9 L18 15 L24 9" stroke="#00c8ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M6 21 L12 15 L18 21 L24 15" stroke="#00ff9d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+          <circle cx="15" cy="15" r="2" fill="#00c8ff" opacity="0.4"/>
+        </svg>
+      </div>
+      <div class="title-block">
+        <h1>NX // Wireless Client</h1>
+        <p id="subtitle">→ AGX Orin via Tailscale</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-chips">
+        <div class="chip" id="ws-chip"><div class="dot"></div><span id="ws-label">WS</span></div>
+        <div class="chip" id="srv-chip"><div class="dot"></div><span>AGX</span></div>
+      </div>
+      <div id="node-id-display">AGX: <span id="display-agx-ip">—</span></div>
+    </div>
+  </header>
+
+  <div id="messages-wrap">
+    <div id="messages">
+      <div id="empty-state">
+        <div class="es-icon">{ }</div>
+        <p>No messages yet — ask AGX anything</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="input-bar">
+    <div id="input-wrap">
+      <label>Query (Ctrl+Enter to send)</label>
+      <textarea id="msg-input" rows="1" placeholder="Type your query for AGX…"></textarea>
+      <div class="key-hint">Ctrl+Enter to send</div>
+    </div>
+    <button id="send-btn" disabled>
+      <span>SEND</span>
+      <span>▶</span>
+    </button>
+  </div>
+</div>
+
+<script>
+let ws = null;
+let wsUrl = '';
+let baseUrl = '';
+let clientName = 'unknown';
+let reconnectTimer = null;
+let pingTimer = null;
+let seenIds = new Set();
+let isConnected = false;
+
+const connectStatus = document.getElementById('connect-status');
+const connMessage = document.getElementById('conn-message');
+const connSpinner = document.getElementById('conn-spinner');
+const connAgxIp = document.getElementById('conn-agx-ip');
+const connNodeName = document.getElementById('conn-node-name');
+const connError = document.getElementById('conn-error');
+const retryBtn = document.getElementById('retry-btn');
+const messagesDiv = document.getElementById('messages');
+const emptyState = document.getElementById('empty-state');
+const msgInput = document.getElementById('msg-input');
+const sendBtn = document.getElementById('send-btn');
+const wsChip = document.getElementById('ws-chip');
+const wsLabel = document.getElementById('ws-label');
+const srvChip = document.getElementById('srv-chip');
+const reconnBar = document.getElementById('reconnect-bar');
+const displayAgxIp = document.getElementById('display-agx-ip');
+const subtitle = document.getElementById('subtitle');
+
+let thinkingRow = null;
+let pendingSince = null;
+
+function log(tag, msg) {
+  console.log(`[${new Date().toISOString().slice(11,23)}] [${tag}] ${msg}`);
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+  catch(_) { return iso.slice(11,19); }
+}
+
+function setWsStatus(state) {
+  wsChip.className = 'chip';
+  if (state === 'online')      { wsChip.classList.add('online'); wsLabel.textContent = 'WS ✓'; }
+  else if (state === 'offline'){ wsChip.classList.add('offline'); wsLabel.textContent = 'WS ✗'; }
+  else                          { wsLabel.textContent = 'WS …'; }
+}
+
+function setSrvStatus(state) {
+  srvChip.className = 'chip';
+  if (state === 'online') srvChip.classList.add('online');
+  else srvChip.classList.add('offline');
+}
+
+function showConnError(msg) {
+  connSpinner.style.display = 'none';
+  connError.textContent = msg;
+  connError.classList.remove('hidden');
+  retryBtn.classList.remove('hidden');
+}
+
+async function loadConfig() {
+  const p = new URLSearchParams(window.location.search);
+  let config = {};
+
+  if (p.get('agx_host') && p.get('agx_port')) {
+    config = {
+      agx_host: p.get('agx_host'),
+      agx_port: parseInt(p.get('agx_port')),
+      node_name: p.get('node_name') || 'nx-node',
+      ws_url: `ws://${p.get('agx_host')}:${p.get('agx_port')}/ws?client_id=${p.get('node_name') || 'nx-node'}`,
+      base_url: `http://${p.get('agx_host')}:${p.get('agx_port')}`,
+    };
+    return config;
+  }
+
+  try {
+    const r = await fetch('/config.json');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    config = await r.json();
+    return config;
+  } catch (e) {
+    log('CONFIG', `/config.json failed: ${e}`);
+  }
+
+  try {
+    const host = window.location.hostname;
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      config = {
+        agx_host: host,
+        agx_port: 8000,
+        node_name: 'nx-node',
+        ws_url: `ws://${host}:8000/ws?client_id=nx-node`,
+        base_url: `http://${host}:8000`,
+      };
+      return config;
+    }
+  } catch(e) {}
+
+  return null;
+}
+
+async function init() {
+  const config = await loadConfig();
+  if (!config) {
+    showConnError('Could not determine AGX connection details. Make sure client2.py is running.');
+    return;
+  }
+
+  wsUrl = config.ws_url;
+  baseUrl = config.base_url;
+  clientName = config.node_name || 'nx-node';
+  connAgxIp.textContent = config.agx_host + ':' + config.agx_port;
+  connNodeName.textContent = clientName;
+  displayAgxIp.textContent = config.agx_host;
+
+  openWS();
+}
+
+function openWS() {
+  if (ws) { try { ws.close(); } catch(_){} }
+  log('WS', `Connecting → ${wsUrl}`);
+
+  ws = new WebSocket(wsUrl);
+
+  ws.addEventListener('open', () => {
+    log('WS', 'Connected');
+    isConnected = true;
+    setWsStatus('online');
+    setSrvStatus('online');
+    reconnBar.classList.remove('visible');
+    sendBtn.disabled = false;
+    clearTimeout(reconnectTimer);
+    startPing();
+    connectStatus.classList.add('hidden');
+  });
+
+  ws.addEventListener('message', (ev) => {
+    let frame;
+    try { frame = JSON.parse(ev.data); } catch(e) { return; }
+    handleFrame(frame);
+  });
+
+  ws.addEventListener('close', (ev) => {
+    log('WS', `Closed code=${ev.code}`);
+    isConnected = false;
+    setWsStatus('offline');
+    sendBtn.disabled = true;
+    stopPing();
+    removeThinking();
+    if (!connectStatus.classList.contains('hidden')) {
+      showConnError('WebSocket connection closed. Is AGX running?');
+    } else {
+      scheduleReconnect();
+    }
+  });
+
+  ws.addEventListener('error', () => {
+    setWsStatus('offline');
+    if (!connectStatus.classList.contains('hidden')) {
+      showConnError('Could not connect to AGX. Check Tailscale IP and ensure server2.py is running on AGX.');
+    }
+  });
+}
+
+function scheduleReconnect() {
+  reconnBar.classList.add('visible');
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    log('WS', 'Reconnecting…');
+    openWS();
+  }, 3000);
+}
+
+function startPing() {
+  stopPing();
+  pingTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({type:'ping'}));
+    }
+  }, 15000);
+}
+function stopPing() { clearInterval(pingTimer); }
+
+function handleFrame(frame) {
+  const t = frame.type;
+
+  if (t === 'history') {
+    const msgs = frame.payload || [];
+    log('HISTORY', `${msgs.length} messages`);
+    msgs.forEach(m => renderMessage(m));
+    scrollToBottom();
+    return;
+  }
+
+  if (t === 'connected') {
+    log('CONNECTED', `to ${frame.node}`);
+    setSrvStatus('online');
+    if (subtitle && frame.node) subtitle.textContent = `→ ${frame.node} via Tailscale`;
+    return;
+  }
+
+  if (t === 'message') {
+    const msg = frame.payload;
+    if (!seenIds.has(msg.id)) {
+      seenIds.add(msg.id);
+      if (msg.role === 'server' && msg.sender !== 'system') {
+        removeThinking();
+      }
+      renderMessage(msg);
+      scrollToBottom();
+    }
+    return;
+  }
+
+  if (t === 'ack') { log('ACK', `id=${frame.id}`); return; }
+  if (t === 'pong') { return; }
+  if (t === 'error') { log('SERVER ERR', frame.detail); return; }
+  log('UNKNOWN FRAME', JSON.stringify(frame));
+}
+
+function renderMessage(msg) {
+  if (!msg || !msg.id) return;
+  if (emptyState.parentNode) emptyState.remove();
+
+  const role = msg.role;
+  const sender = msg.sender || '?';
+
+  const row = document.createElement('div');
+  row.className = 'msg-row';
+  row.dataset.id = msg.id;
+
+  if (role === 'system') {
+    row.classList.add('from-system');
+    row.innerHTML = `<div class="msg-bubble">${escHtml(msg.text)}</div>`;
+    messagesDiv.appendChild(row);
+    return;
+  }
+
+  const isAGX = (role === 'server');
+
+  row.classList.add(isAGX ? 'from-agx' : 'from-nx');
+
+  const ts = formatTime(msg.timestamp);
+  const displaySender = sender.replace(/-qwen[\d.]+b(-instruct)?(-q[\w]+)?/i, '').replace(/-+$/, '').toUpperCase() || sender.toUpperCase();
+  const senderLabel = isAGX ? `${displaySender} ▶` : `◀ ${displaySender}`;
+
+  row.innerHTML = `
+    <div class="msg-meta">
+      <span class="msg-sender">${escHtml(senderLabel)}</span>
+      <span>${ts}</span>
+    </div>
+    <div class="msg-bubble">${escHtml(msg.text)}</div>
+  `;
+
+  messagesDiv.appendChild(row);
+}
+
+function scrollToBottom() {
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+sendBtn.addEventListener('click', sendMessage);
+
+msgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.ctrlKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+  setTimeout(() => {
+    msgInput.style.height = 'auto';
+    msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
+  }, 0);
+});
+
+function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+
+  const tempId = 'temp-' + Date.now();
+  const tempMsg = {
+    id: tempId,
+    sender: clientName,
+    role: 'user',
+    text,
+    timestamp: new Date().toISOString(),
+  };
+  seenIds.add(tempId);
+  renderMessage(tempMsg);
+  scrollToBottom();
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'message', sender: clientName, text }));
+  } else {
+    log('SEND FAIL', 'WS not open');
+    fetch(`${baseUrl}/send`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ sender: clientName, text }),
+    }).catch(e => log('REST FAIL', e.toString()));
+  }
+
+  showThinking();
+  msgInput.value = '';
+  msgInput.style.height = 'auto';
+  log('SEND', `text=${text.slice(0,60)}`);
+}
+
+function showThinking() {
+  removeThinking();
+  if (emptyState.parentNode) emptyState.remove();
+
+  thinkingRow = document.createElement('div');
+  thinkingRow.className = 'msg-row from-agx thinking-bubble';
+  thinkingRow.id = 'thinking-indicator';
+  pendingSince = Date.now();
+
+  thinkingRow.innerHTML = `
+    <div class="msg-meta">
+      <span class="msg-sender" style="color:var(--agx-col)">AGX ▶</span>
+      <span id="thinking-elapsed">0s</span>
+    </div>
+    <div class="msg-bubble">
+      <span class="thinking-dot"></span>
+      <span class="thinking-dot"></span>
+      <span class="thinking-dot"></span>
+      <span class="thinking-label">inferring on AGX…</span>
+    </div>
+  `;
+  messagesDiv.appendChild(thinkingRow);
+  scrollToBottom();
+
+  thinkingRow._ticker = setInterval(() => {
+    if (!thinkingRow || !thinkingRow.parentNode) return;
+    const el = document.getElementById('thinking-elapsed');
+    if (el) el.textContent = Math.floor((Date.now() - pendingSince) / 1000) + 's';
+  }, 1000);
+}
+
+function removeThinking() {
+  if (thinkingRow) {
+    clearInterval(thinkingRow._ticker);
+    thinkingRow.remove();
+    thinkingRow = null;
+    pendingSince = null;
+  }
+}
+
+retryBtn.addEventListener('click', () => {
+  connError.classList.add('hidden');
+  retryBtn.classList.add('hidden');
+  connSpinner.style.display = 'inline-block';
+  connMessage.textContent = 'Reconnecting…';
+  openWS();
+});
+
+init();
+</script>
+</body>
+</html>
