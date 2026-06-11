@@ -6,47 +6,50 @@
 <title>Orin NX</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-
-/* ── Tokens ─────────────────────────────────────────────────────── */
 :root {
-  --bg:       #0C0C0C;
-  --s1:       #161616;
-  --s2:       #1F1F1F;
-  --s3:       #2A2A2A;
-  --b1:       rgba(255,255,255,0.06);
-  --b2:       rgba(255,255,255,0.10);
-  --t1:       #E4E4E7;
-  --t2:       #52525B;
-  --t3:       #3F3F46;
-  --ac:       #34D399;
-  --ac0:      rgba(52,211,153,0.07);
-  --ubg:      #1A1A1A;
-  --ut:       #D4D4D8;
-  --e:        cubic-bezier(.4,0,.2,1);
-  --es:       cubic-bezier(.34,1.4,.64,1);
-  --ff:       'Manrope', sans-serif;
-  --fm:       'JetBrains Mono', monospace;
+  --bg:        #0A0A0A;
+  --sidebar:   #111111;
+  --s1:        #161616;
+  --s2:        #1E1E1E;
+  --s3:        #2A2A2A;
+  --b1:        rgba(255,255,255,0.05);
+  --b2:        rgba(255,255,255,0.09);
+  --b3:        rgba(255,255,255,0.14);
+  --t1:        #EFEFEF;
+  --t2:        #7A7A7A;
+  --t3:        #3F3F3F;
+  --ac:        #34D399;
+  --ac-dim:    rgba(52,211,153,0.08);
+  --ac-mid:    rgba(52,211,153,0.18);
+  --ubg:       #1C1C1C;
+  --ut:        #D8D8D8;
+  --danger:    #EF4444;
+  --e:         cubic-bezier(.4,0,.2,1);
+  --es:        cubic-bezier(.34,1.4,.64,1);
+  --sidebar-w: 260px;
+  --ff:        'Syne', sans-serif;
+  --fm:        'DM Mono', monospace;
 }
-
 [data-theme="light"] {
-  --bg:   #FAFAFA;
-  --s1:   #F2F2F2;
-  --s2:   #EAEAEA;
-  --s3:   #E0E0E0;
-  --b1:   rgba(0,0,0,0.06);
-  --b2:   rgba(0,0,0,0.10);
-  --t1:   #18181B;
-  --t2:   #71717A;
-  --t3:   #A1A1AA;
-  --ac:   #059669;
-  --ac0:  rgba(5,150,105,0.07);
-  --ubg:  #E8E8EB;
-  --ut:   #27272A;
+  --bg:      #F6F6F4;
+  --sidebar: #EDEDE9;
+  --s1:      #E8E8E4;
+  --s2:      #DEDED9;
+  --s3:      #D2D2CC;
+  --b1:      rgba(0,0,0,0.05);
+  --b2:      rgba(0,0,0,0.09);
+  --b3:      rgba(0,0,0,0.14);
+  --t1:      #141414;
+  --t2:      #7A7A7A;
+  --t3:      #BBBBBB;
+  --ac:      #059669;
+  --ac-dim:  rgba(5,150,105,0.07);
+  --ac-mid:  rgba(5,150,105,0.15);
+  --ubg:     #E2E2DC;
+  --ut:      #1A1A1A;
 }
-
-/* ── Reset ──────────────────────────────────────────────────────── */
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0 }
 html { -webkit-text-size-adjust:100% }
 body {
@@ -56,68 +59,204 @@ body {
   height: 100dvh;
   overflow: hidden;
   display: flex;
-  flex-direction: column;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  transition: background .18s var(--e), color .18s var(--e);
+  transition: background .2s var(--e), color .2s var(--e);
 }
-
-/* ── Shell ──────────────────────────────────────────────────────── */
-#shell {
+#sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--sidebar);
+  border-right: 1px solid var(--b1);
   display: flex;
   flex-direction: column;
   height: 100dvh;
-  max-width: 720px;
-  width: 100%;
-  margin: 0 auto;
+  transition: transform .3s var(--e), background .2s var(--e);
+  z-index: 50;
+  overflow: hidden;
 }
-
-/* ── Header ─────────────────────────────────────────────────────── */
-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 52px;
-  padding: 0 20px;
+@media (max-width: 768px) {
+  #sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    transform: translateX(-100%);
+    box-shadow: 4px 0 32px rgba(0,0,0,.45);
+  }
+  #sidebar.open { transform: translateX(0) }
+  #overlay-mask {
+    position: fixed; inset: 0; z-index: 49;
+    background: rgba(0,0,0,.5);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    opacity: 0; pointer-events: none;
+    transition: opacity .3s var(--e);
+  }
+  #overlay-mask.show { opacity:1; pointer-events:all }
+}
+@media (min-width: 769px) {
+  #overlay-mask { display: none !important }
+}
+.sb-top {
+  padding: 18px 14px 14px;
   border-bottom: 1px solid var(--b1);
   flex-shrink: 0;
-  gap: 12px;
 }
-
-.h-name {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .16em;
-  color: var(--t1);
-  font-family: var(--fm);
-  white-space: nowrap;
-}
-
-.h-status {
+.sb-brand {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
+  gap: 9px;
+  margin-bottom: 14px;
 }
-
-.dot {
-  width: 5px;
-  height: 5px;
+.sb-icon {
+  width: 28px; height: 28px;
+  border-radius: 7px;
+  background: var(--ac-dim);
+  border: 1px solid var(--ac-mid);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.sb-icon svg { width: 14px; height: 14px; color: var(--ac) }
+.sb-wordmark {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  color: var(--t1);
+  font-family: var(--fm);
+  text-transform: uppercase;
+}
+.new-chat-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--b2);
+  background: transparent;
+  color: var(--t2);
+  font-family: var(--ff);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s var(--e);
+  text-align: left;
+}
+.new-chat-btn:hover { background: var(--b1); color: var(--t1); border-color: var(--b3) }
+.new-chat-btn svg { width: 13px; height: 13px; flex-shrink: 0; opacity: .7 }
+.sb-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 10px;
+}
+.sb-history::-webkit-scrollbar { width: 2px }
+.sb-history::-webkit-scrollbar-thumb { background: var(--b2); border-radius: 4px }
+.sb-section-label {
+  font-size: 9px;
+  font-family: var(--fm);
+  color: var(--t3);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  padding: 10px 6px 5px;
+}
+.conv-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .13s var(--e);
+  position: relative;
+}
+.conv-item:hover { background: var(--b1) }
+.conv-item.active { background: var(--ac-dim) }
+.conv-item.active .conv-title { color: var(--t1) }
+.conv-dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--t3);
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.conv-item.active .conv-dot { background: var(--ac) }
+.conv-title {
+  font-size: 12.5px;
+  color: var(--t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  font-weight: 400;
+  transition: color .13s;
+}
+.conv-del {
+  width: 22px; height: 22px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition: all .12s var(--e);
+  flex-shrink: 0;
+}
+.conv-item:hover .conv-del { opacity: 1 }
+.conv-del:hover { background: rgba(239,68,68,.12); color: var(--danger) }
+.conv-del svg { width: 11px; height: 11px }
+.sb-empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--t3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sb-empty-icon { font-size: 20px; margin-bottom: 8px; opacity: .4 }
+.sb-foot {
+  border-top: 1px solid var(--b1);
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.sb-foot-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--t2);
+  font-family: var(--ff);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all .14s var(--e);
+  width: 100%;
+}
+.sb-foot-btn:hover { background: var(--b1); color: var(--t1) }
+.sb-foot-btn svg { width: 14px; height: 14px; flex-shrink: 0; opacity: .6 }
+.sb-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px 4px;
+}
+.sb-status-dot {
+  width: 6px; height: 6px;
   border-radius: 50%;
   background: var(--ac);
+  animation: pulse 2.8s ease-in-out infinite;
   flex-shrink: 0;
-  animation: blink 2.8s ease-in-out infinite;
 }
-.dot.off  { background: #EF4444; animation: none }
-.dot.wait { background: #F59E0B; animation: blink .8s ease-in-out infinite }
-
-@keyframes blink {
-  0%,100% { opacity:1 }
-  50%      { opacity:.3 }
+.sb-status-dot.off  { background: var(--danger); animation: none }
+.sb-status-dot.wait { background: #F59E0B; animation: pulse .8s ease-in-out infinite }
+@keyframes pulse {
+  0%,100% { opacity:1 } 50% { opacity:.25 }
 }
-
-.h-status-text {
+.sb-status-txt {
   font-size: 10.5px;
   font-family: var(--fm);
   color: var(--t3);
@@ -125,257 +264,336 @@ header {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.h-actions {
+#main {
+  flex: 1;
   display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-width: 0;
+  background: var(--bg);
+  transition: background .2s var(--e);
+}
+#topbar {
+  display: none;
   align-items: center;
-  gap: 2px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--b1);
+  gap: 12px;
   flex-shrink: 0;
 }
-
-.ib {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: var(--t3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: color .15s var(--e), background .15s var(--e);
+@media (max-width: 768px) {
+  #topbar { display: flex }
 }
-.ib:hover  { color: var(--t1); background: var(--s2) }
+.menu-btn {
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  background: transparent; border: none;
+  color: var(--t2);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all .14s var(--e);
+  flex-shrink: 0;
+}
+.menu-btn:hover { background: var(--b1); color: var(--t1) }
+.menu-btn svg { width: 16px; height: 16px }
+.topbar-title {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--fm);
+  font-weight: 500;
+  letter-spacing: .12em;
+  color: var(--t2);
+  text-transform: uppercase;
+}
+.topbar-actions { display: flex; gap: 2px }
+.ib {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  border: none; background: transparent;
+  color: var(--t2);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all .14s var(--e);
+}
+.ib:hover { color: var(--t1); background: var(--b1) }
 .ib:active { background: var(--s3) }
 .ib svg { width: 15px; height: 15px; pointer-events: none }
-
-/* ── Messages ───────────────────────────────────────────────────── */
+#desktop-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 52px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--b1);
+  flex-shrink: 0;
+  gap: 6px;
+}
+@media (max-width: 768px) {
+  #desktop-topbar { display: none }
+}
+.conv-name-display {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--fm);
+  color: var(--t3);
+  font-weight: 400;
+  letter-spacing: .05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 #msgs {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 28px 20px 8px;
+  padding: 32px 0 8px;
   display: flex;
   flex-direction: column;
-  gap: 0;
   scroll-behavior: smooth;
 }
-#msgs::-webkit-scrollbar { width: 2px }
+#msgs::-webkit-scrollbar { width: 3px }
 #msgs::-webkit-scrollbar-track { background: transparent }
 #msgs::-webkit-scrollbar-thumb { background: var(--b2); border-radius: 4px }
-
-/* ── Welcome ────────────────────────────────────────────────────── */
 #welcome {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-end;
-  padding: 0 0 32px;
-  gap: 12px;
-  animation: up .45s var(--e) both;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px 48px;
+  gap: 14px;
+  animation: fadeUp .5s var(--e) both;
+  text-align: center;
 }
-
-@keyframes up {
-  from { opacity:0; transform:translateY(12px) }
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(16px) }
   to   { opacity:1; transform:none }
 }
-
-.w-title {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -.01em;
-  color: var(--t1);
-  line-height: 1.2;
+.w-glyph {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  background: var(--ac-dim);
+  border: 1px solid var(--ac-mid);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 2px;
 }
-
+.w-glyph svg { width: 20px; height: 20px; color: var(--ac) }
+.w-title {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--t1);
+  line-height: 1.15;
+}
 .w-sub {
   font-size: 13px;
   color: var(--t2);
-  line-height: 1.6;
-  max-width: 340px;
+  line-height: 1.65;
+  max-width: 380px;
   font-weight: 400;
 }
-
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
+  gap: 7px;
+  justify-content: center;
+  margin-top: 6px;
+  max-width: 480px;
 }
-
 .chip {
-  padding: 6px 12px;
-  border-radius: 20px;
+  padding: 7px 14px;
+  border-radius: 100px;
   border: 1px solid var(--b2);
   background: transparent;
   font-size: 12px;
   font-family: var(--ff);
   color: var(--t2);
   cursor: pointer;
-  transition: all .15s var(--e);
+  font-weight: 500;
+  transition: all .14s var(--e);
   white-space: nowrap;
 }
-.chip:hover  { border-color: var(--ac); color: var(--ac); background: var(--ac0) }
-.chip:active { opacity: .75 }
-
-/* ── Message rows ───────────────────────────────────────────────── */
+.chip:hover { border-color: var(--ac); color: var(--ac); background: var(--ac-dim) }
+.chip:active { opacity: .7 }
 .msg {
   max-width: 100%;
-  animation: msg-in .22s var(--e) both;
+  animation: msgIn .2s var(--e) both;
+  padding: 0 20px;
 }
-
-@keyframes msg-in {
-  from { opacity:0; transform:translateY(8px) }
+@keyframes msgIn {
+  from { opacity:0; transform:translateY(7px) }
   to   { opacity:1; transform:none }
 }
-
-/* AI message */
-.msg.ai {
-  padding: 14px 0;
-  border-bottom: 1px solid var(--b1);
-  display: grid;
-  grid-template-columns: 28px 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 12px;
+.msg-inner {
+  max-width: 740px;
+  margin: 0 auto;
+  width: 100%;
 }
-
-.msg-tag {
-  font-size: 9.5px;
+.msg.ai { padding-top: 20px; padding-bottom: 20px }
+.msg.ai + .msg.ai { padding-top: 4px }
+.ai-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ai-avatar {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: var(--ac-dim);
+  border: 1px solid var(--ac-mid);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.ai-avatar svg { width: 12px; height: 12px; color: var(--ac) }
+.ai-content { flex: 1; min-width: 0 }
+.ai-label {
+  font-size: 10px;
   font-family: var(--fm);
-  font-weight: 500;
   color: var(--ac);
-  letter-spacing: .06em;
-  padding-top: 2px;
-  opacity: .7;
-  white-space: nowrap;
+  letter-spacing: .1em;
+  margin-bottom: 6px;
+  opacity: .75;
+  font-weight: 500;
 }
-
 .msg-body {
   font-size: 14.5px;
-  line-height: 1.72;
+  line-height: 1.78;
   color: var(--t1);
   font-weight: 400;
-  min-width: 0;
 }
-
-.msg-time {
+.msg-meta {
   font-size: 10px;
   font-family: var(--fm);
   color: var(--t3);
-  margin-top: 6px;
+  margin-top: 8px;
   opacity: 0;
   transition: opacity .15s var(--e);
-  grid-column: 2;
 }
-.msg:hover .msg-time { opacity: 1 }
-
-/* User message */
-.msg.user {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  padding: 10px 0;
-}
-
+.msg:hover .msg-meta { opacity: 1 }
+.msg.user { padding-top: 16px; padding-bottom: 4px }
+.user-row { display: flex; justify-content: flex-end }
 .user-bubble {
   background: var(--ubg);
   color: var(--ut);
-  padding: 10px 15px;
+  padding: 11px 16px;
   border-radius: 16px 16px 3px 16px;
   font-size: 14.5px;
-  line-height: 1.65;
-  max-width: 82%;
+  line-height: 1.68;
+  max-width: 75%;
   word-break: break-word;
   font-weight: 400;
+  border: 1px solid var(--b2);
 }
-
-/* Markdown */
-.msg-body p, .user-bubble p { margin-bottom: 8px }
+.msg-body p, .user-bubble p { margin-bottom: 9px }
 .msg-body p:last-child, .user-bubble p:last-child { margin-bottom: 0 }
-.msg-body ul,.msg-body ol { padding-left: 18px; margin: 6px 0 }
-.msg-body li { margin-bottom: 3px }
+.msg-body ul,.msg-body ol { padding-left: 20px; margin: 7px 0 }
+.msg-body li { margin-bottom: 4px }
 .msg-body strong,.user-bubble strong { font-weight: 600 }
+.msg-body em { font-style: italic }
 .msg-body pre {
-  background: var(--s2);
-  border: 1px solid var(--b1);
-  border-radius: 8px;
-  padding: 11px 14px;
+  background: var(--s1);
+  border: 1px solid var(--b2);
+  border-radius: 10px;
+  padding: 13px 16px;
   overflow-x: auto;
-  margin: 8px 0;
+  margin: 10px 0;
   font-family: var(--fm);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .msg-body code, .user-bubble code {
   font-family: var(--fm);
   font-size: 12.5px;
   background: var(--s2);
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
 }
 .msg-body pre code { background: none; padding: 0 }
-
-/* ── Typing ─────────────────────────────────────────────────────── */
+.msg-body h1, .msg-body h2, .msg-body h3, .msg-body h4 { margin: 12px 0 6px; font-weight: 600; letter-spacing: -.01em }
+.msg-body h1 { font-size: 20px }
+.msg-body h2 { font-size: 17px }
+.msg-body h3 { font-size: 15px }
+.msg-body blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--ac);
+  background: var(--ac-dim);
+  border-radius: 4px;
+  color: var(--t2);
+}
+.msg-body hr { border: none; border-top: 1px solid var(--b2); margin: 14px 0 }
+.msg-body ul, .msg-body ol { padding-left: 22px; margin: 6px 0 }
+.msg-body li { margin-bottom: 3px }
+.msg-body a { color: var(--ac); text-decoration: underline; text-underline-offset: 2px }
+.msg-body a:hover { opacity: .78 }
+.msg-divider {
+  height: 1px;
+  background: var(--b1);
+  margin: 0 20px;
+}
 #typing-row {
-  padding: 14px 0;
-  border-bottom: 1px solid var(--b1);
-  display: grid;
-  grid-template-columns: 28px 1fr;
-  column-gap: 12px;
+  padding: 20px 20px 16px;
+  animation: msgIn .2s var(--e) both;
+}
+.typing-inner {
+  max-width: 740px;
+  margin: 0 auto;
+  display: flex;
   align-items: center;
-  animation: msg-in .2s var(--e) both;
+  gap: 12px;
 }
-
 .t-tag {
-  font-size: 9.5px;
-  font-family: var(--fm);
-  color: var(--ac);
-  letter-spacing: .06em;
-  opacity: .7;
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: var(--ac-dim);
+  border: 1px solid var(--ac-mid);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
 }
-
+.t-tag svg { width: 12px; height: 12px; color: var(--ac) }
 .t-dots {
   display: flex;
   gap: 4px;
   align-items: center;
-  height: 20px;
+  height: 22px;
 }
-
 .t-dot {
-  width: 4px;
-  height: 4px;
+  width: 4px; height: 4px;
   border-radius: 50%;
   background: var(--t3);
   animation: tdot 1.1s ease-in-out infinite;
 }
 .t-dot:nth-child(2) { animation-delay:.14s }
 .t-dot:nth-child(3) { animation-delay:.28s }
-
 @keyframes tdot {
-  0%,60%,100% { transform:translateY(0); opacity:.4 }
+  0%,60%,100% { transform:translateY(0); opacity:.35 }
   30%          { transform:translateY(-4px); opacity:1 }
 }
-
-/* ── Input ──────────────────────────────────────────────────────── */
-#inp-wrap {
+#inp-area {
   flex-shrink: 0;
-  padding: 12px 20px env(safe-area-inset-bottom, 16px);
+  padding: 12px 20px env(safe-area-inset-bottom, 18px);
   border-top: 1px solid var(--b1);
 }
-
-.inp-row {
+.inp-outer { max-width: 740px; margin: 0 auto }
+.inp-box {
+  background: var(--s1);
+  border: 1px solid var(--b2);
+  border-radius: 14px;
   display: flex;
   align-items: flex-end;
-  gap: 10px;
+  gap: 8px;
+  padding: 10px 10px 10px 16px;
+  transition: border-color .15s var(--e);
 }
-
+.inp-box:focus-within { border-color: var(--b3) }
 #inp {
   flex: 1;
   background: transparent;
-  border: none;
-  outline: none;
+  border: none; outline: none;
   font-family: var(--ff);
   font-size: 14.5px;
   color: var(--t1);
@@ -390,265 +608,278 @@ header {
 #inp::placeholder { color: var(--t3) }
 #inp::-webkit-scrollbar { width: 2px }
 #inp::-webkit-scrollbar-thumb { background: var(--b2); border-radius: 4px }
-
 #send {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  width: 32px; height: 32px;
+  border-radius: 9px;
   background: var(--ac);
   border: none;
-  color: #052e1a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  color: #04231a;
+  display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: transform .15s var(--es), opacity .15s var(--e);
-  margin-bottom: 1px;
+  transition: transform .15s var(--es), opacity .15s var(--e), background .15s;
 }
-#send:hover:not(:disabled)  { transform: scale(1.1) }
-#send:active:not(:disabled) { transform: scale(.92) }
-#send:disabled { opacity: .25; cursor: not-allowed }
+#send:hover:not(:disabled)  { transform: scale(1.08); background: #3ee8ab }
+#send:active:not(:disabled) { transform: scale(.9) }
+#send:disabled { opacity: .22; cursor: not-allowed }
 #send svg { width: 13px; height: 13px }
-
-/* scroll-to-bottom */
+.inp-hint {
+  font-size: 10px;
+  font-family: var(--fm);
+  color: var(--t3);
+  text-align: center;
+  margin-top: 8px;
+}
 #scb {
-  position: absolute;
-  bottom: 84px;
-  right: 20px;
-  width: 30px;
-  height: 30px;
+  position: fixed;
+  bottom: 88px;
+  right: 24px;
+  width: 32px; height: 32px;
   border-radius: 50%;
   background: var(--s2);
   border: 1px solid var(--b2);
   color: var(--t2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   z-index: 9;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(4px);
+  opacity: 0; pointer-events: none;
+  transform: translateY(6px);
   transition: all .18s var(--e);
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
 }
 #scb.show { opacity:1; pointer-events:all; transform:none }
 #scb:hover { color: var(--t1) }
 #scb svg { width:13px; height:13px }
-
-/* ── Settings overlay ───────────────────────────────────────────── */
 .ov {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  z-index: 100;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.65);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 200;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0; pointer-events: none;
   transition: opacity .2s var(--e);
 }
 .ov.open { opacity:1; pointer-events:all }
-
 .pane {
   background: var(--s1);
   border: 1px solid var(--b2);
   border-bottom: none;
-  border-radius: 18px 18px 0 0;
+  border-radius: 20px 20px 0 0;
   padding: 20px 22px calc(28px + env(safe-area-inset-bottom, 0px));
   width: 100%;
-  max-width: 720px;
+  max-width: 520px;
   transform: translateY(100%);
   transition: transform .32s var(--es);
-  max-height: 78dvh;
+  max-height: 80dvh;
   overflow-y: auto;
 }
 .ov.open .pane { transform: none }
-
-@media (min-width: 720px) {
-  .pane { border-radius:18px; border-bottom:1px solid var(--b2); margin-bottom:20px }
+@media (min-width: 640px) {
+  .pane { border-radius: 20px; border-bottom: 1px solid var(--b2); margin-bottom: 24px }
 }
-
 .pane-grip {
   width: 32px; height: 3px;
-  border-radius: 4px;
-  background: var(--b2);
+  border-radius: 4px; background: var(--b2);
   margin: 0 auto 20px;
 }
-
 .pane-title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: .08em;
-  color: var(--t1);
-  font-family: var(--fm);
-  margin-bottom: 20px;
+  font-size: 12px; font-weight: 700;
+  letter-spacing: .12em; color: var(--t1);
+  font-family: var(--fm); margin-bottom: 20px;
+  text-transform: uppercase;
 }
-
 .field { margin-bottom: 16px }
 .f-label {
-  font-size: 9.5px;
-  font-family: var(--fm);
-  color: var(--t3);
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  margin-bottom: 6px;
+  font-size: 9px; font-family: var(--fm);
+  color: var(--t3); letter-spacing: .12em;
+  text-transform: uppercase; margin-bottom: 6px;
 }
 .f-input, .f-ta {
   width: 100%;
   background: var(--s2);
   border: 1px solid var(--b1);
-  border-radius: 9px;
-  padding: 10px 12px;
-  font-family: var(--fm);
-  font-size: 12px;
-  color: var(--t1);
-  outline: none;
+  border-radius: 10px;
+  padding: 10px 13px;
+  font-family: var(--fm); font-size: 12px;
+  color: var(--t1); outline: none;
   transition: border-color .15s var(--e);
 }
-.f-input:focus, .f-ta:focus { border-color: var(--b2) }
-.f-ta { resize: vertical; min-height: 68px }
-
-.seg {
-  display: flex;
-  gap: 5px;
-  margin-bottom: 18px;
-}
+.f-input:focus, .f-ta:focus { border-color: var(--b3) }
+.f-ta { resize: vertical; min-height: 70px }
+.seg { display: flex; gap: 5px; margin-bottom: 18px }
 .sb {
-  flex: 1;
-  padding: 8px 6px;
-  border-radius: 8px;
-  border: 1px solid var(--b1);
-  background: var(--s2);
-  color: var(--t2);
-  font-size: 11px;
-  font-family: var(--fm);
-  cursor: pointer;
-  text-align: center;
-  transition: all .15s var(--e);
+  flex: 1; padding: 8px 6px;
+  border-radius: 9px; border: 1px solid var(--b1);
+  background: var(--s2); color: var(--t2);
+  font-size: 11px; font-family: var(--fm);
+  cursor: pointer; text-align: center;
+  transition: all .14s var(--e);
 }
-.sb.on { background: var(--ac0); color: var(--ac); border-color: rgba(52,211,153,.2) }
-
-[data-theme="light"] .sb.on {
-  background: rgba(5,150,105,.08);
-  color: var(--ac);
-  border-color: rgba(5,150,105,.2);
-}
-
+.sb.on { background: var(--ac-dim); color: var(--ac); border-color: rgba(52,211,153,.2) }
+[data-theme="light"] .sb.on { background: rgba(5,150,105,.08); color: var(--ac); border-color: rgba(5,150,105,.2) }
 .p-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 14px;
+  display: flex; align-items: center;
+  justify-content: space-between; gap: 10px; margin-bottom: 14px;
 }
 .p-row-lbl { font-size: 13px; color: var(--t2) }
-
 .tog {
   width: 38px; height: 21px;
   border-radius: 100px;
-  background: var(--s3);
-  border: 1px solid var(--b2);
-  cursor: pointer;
-  position: relative;
-  flex-shrink: 0;
+  background: var(--s3); border: 1px solid var(--b2);
+  cursor: pointer; position: relative; flex-shrink: 0;
   transition: background .15s var(--e);
 }
 .tog.on { background: var(--ac); border-color: transparent }
 .tog::after {
-  content: '';
-  position: absolute;
-  top: 2px; left: 2px;
-  width: 15px; height: 15px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform .15s var(--es);
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: #fff; transition: transform .15s var(--es);
 }
 .tog.on::after { transform: translateX(17px) }
-
 .del-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-radius: 7px;
-  border: 1px solid var(--b1);
-  background: transparent;
-  color: var(--t3);
-  font-size: 11.5px;
-  font-family: var(--fm);
-  cursor: pointer;
-  transition: all .15s var(--e);
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--b1); background: transparent;
+  color: var(--t3); font-size: 11.5px; font-family: var(--fm);
+  cursor: pointer; transition: all .14s var(--e);
 }
-.del-btn:hover { color: #EF4444; border-color: rgba(239,68,68,.25); background: rgba(239,68,68,.06) }
+.del-btn:hover { color: var(--danger); border-color: rgba(239,68,68,.25); background: rgba(239,68,68,.07) }
 .del-btn svg { width: 11px; height: 11px }
-
 .apply {
-  width: 100%;
-  margin-top: 18px;
-  padding: 12px;
-  border-radius: 10px;
-  background: var(--t1);
-  color: var(--bg);
-  border: none;
-  font-family: var(--ff);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: .02em;
-  cursor: pointer;
-  transition: opacity .15s var(--e);
+  width: 100%; margin-top: 18px; padding: 12px;
+  border-radius: 11px; background: var(--t1);
+  color: var(--bg); border: none;
+  font-family: var(--ff); font-size: 13px;
+  font-weight: 600; letter-spacing: .04em;
+  cursor: pointer; transition: opacity .15s var(--e);
 }
-.apply:hover { opacity: .85 }
-
-/* ── Responsive ─────────────────────────────────────────────────── */
-@media (max-width: 480px) {
-  header { padding: 0 16px }
-  #msgs  { padding: 20px 16px 6px }
-  #inp-wrap { padding: 10px 16px env(safe-area-inset-bottom, 14px) }
-  .msg-body,.user-bubble { font-size: 14px }
-  .user-bubble { max-width: 88% }
-  .w-title { font-size: 20px }
-  #scb { right: 16px }
-}
-
+.apply:hover { opacity: .84 }
 .hidden { display: none !important }
-
+@media (max-width: 480px) {
+  #msgs { padding: 20px 0 6px }
+  .msg  { padding-left: 14px; padding-right: 14px }
+  #typing-row { padding-left: 14px; padding-right: 14px }
+  .msg-divider { margin: 0 14px }
+  #inp-area { padding: 10px 14px env(safe-area-inset-bottom, 14px) }
+  .msg-body, .user-bubble { font-size: 14px }
+  .user-bubble { max-width: 88% }
+  .w-title { font-size: 22px }
+}
 </style>
 </head>
 <body>
 
-<div id="shell">
+<div id="overlay-mask"></div>
 
-  <header>
-    <div class="h-status">
-      <div class="dot" id="dot"></div>
-      <span class="h-name">ORIN NX</span>
-      <span class="h-status-text" id="stxt">ready</span>
+<aside id="sidebar">
+  <div class="sb-top">
+    <div class="sb-brand">
+      <div class="sb-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <span class="sb-wordmark">Orin NX</span>
     </div>
-    <div class="h-actions">
-      <button class="ib" id="tbtn" aria-label="Toggle theme">
-        <svg id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <button class="new-chat-btn" id="newchat-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+      New session
+    </button>
+  </div>
+  <div class="sb-history" id="sb-history">
+    <div class="sb-section-label">Recent</div>
+    <div id="conv-list">
+      <div class="sb-empty">
+        <div class="sb-empty-icon">◎</div>
+        No sessions yet.<br>Start a new chat above.
+      </div>
+    </div>
+  </div>
+  <div class="sb-foot">
+    <div class="sb-status">
+      <div class="sb-status-dot" id="sb-dot"></div>
+      <span class="sb-status-txt" id="sb-stxt">ready</span>
+    </div>
+    <button class="sb-foot-btn" id="theme-btn-sb">
+      <svg id="sb-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+      </svg>
+      <svg id="sb-moon" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <span id="theme-label">Light mode</span>
+    </button>
+    <button class="sb-foot-btn" id="sbtn-foot">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      Settings
+    </button>
+  </div>
+</aside>
+
+<div id="main">
+  <div id="topbar">
+    <button class="menu-btn" id="menu-btn" aria-label="Toggle sidebar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
+    <span class="topbar-title">Orin NX</span>
+    <div class="topbar-actions">
+      <button class="ib" id="tbtn-mobile" aria-label="Toggle theme">
+        <svg id="i-sun-m" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="4"/>
           <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
         </svg>
-        <svg id="i-moon" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <svg id="i-moon-m" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
         </svg>
       </button>
-      <button class="ib" id="sbtn" aria-label="Settings">
+      <button class="ib" id="sbtn-mobile" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
       </button>
     </div>
-  </header>
+  </div>
+
+  <div id="desktop-topbar">
+    <span class="conv-name-display" id="conv-name-display">New session</span>
+    <button class="ib" id="tbtn-desktop" aria-label="Toggle theme">
+      <svg id="i-sun-d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+      </svg>
+      <svg id="i-moon-d" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
+    <button class="ib" id="sbtn-desktop" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </div>
 
   <div id="msgs">
     <div id="welcome">
+      <div class="w-glyph">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
       <div class="w-title">What can I help<br>you figure out?</div>
       <div class="w-sub">Edge inference agent on Jetson Orin NX. On-device, no cloud.</div>
       <div class="chips">
@@ -666,46 +897,42 @@ header {
     </svg>
   </button>
 
-  <div id="inp-wrap">
-    <div class="inp-row">
-      <textarea id="inp" rows="1" placeholder="Ask anything…" aria-label="Message"></textarea>
-      <button id="send" disabled aria-label="Send">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
-        </svg>
-      </button>
+  <div id="inp-area">
+    <div class="inp-outer">
+      <div class="inp-box">
+        <textarea id="inp" rows="1" placeholder="Ask anything…" aria-label="Message"></textarea>
+        <button id="send" disabled aria-label="Send">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="inp-hint">Orin NX · on-device inference · no cloud</div>
     </div>
   </div>
-
 </div>
 
-<!-- Settings -->
 <div class="ov" id="ov">
   <div class="pane" id="pane">
     <div class="pane-grip"></div>
-    <div class="pane-title">SETTINGS</div>
-
+    <div class="pane-title">Settings</div>
     <div class="seg" id="mseg">
       <button class="sb on" data-mode="demo">demo</button>
       <button class="sb"    data-mode="websocket">ws</button>
       <button class="sb"    data-mode="rest">rest</button>
     </div>
-
     <div class="field">
       <div class="f-label">Endpoint</div>
       <input class="f-input" id="epinp" type="text" placeholder="ws://192.168.x.x:8765">
     </div>
-
     <div class="field">
       <div class="f-label">System Prompt</div>
       <textarea class="f-ta" id="spinp" placeholder="You are Orin NX…"></textarea>
     </div>
-
     <div class="p-row">
       <span class="p-row-lbl">Stream</span>
       <div class="tog on" id="stog"></div>
     </div>
-
     <div class="p-row">
       <button class="del-btn" id="clrbtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -714,18 +941,19 @@ header {
         Clear chat
       </button>
     </div>
-
     <button class="apply" id="applybtn">Apply</button>
   </div>
 </div>
 
 <script>
-// ── State ─────────────────────────────────────────────────────────
 const S = {
   msgs: [], busy: false,
   mode: 'websocket', endpoint: '', stream: true,
   theme: 'dark', atBottom: true,
-  sys: 'You are Orin NX, a sophisticated edge AI inference agent running on an NVIDIA Jetson Orin NX. You specialize in on-device ML inference, edge computing, and embedded systems. Be concise and technical.',
+    sys: 'You are a medical assistant. Answer questions about symptoms, conditions, and treatments based on medical knowledge.',
+  sessions: [],
+  activeSession: null,
+  aiMsgEl: null
 };
 
 let di = 0;
@@ -739,21 +967,23 @@ const DR = [
   'Zero cloud dependency. Embeddings, tokenization, and inference run entirely on Ampere GPU cores. Cold-start: 340 ms. Warm: < 5 ms.',
 ];
 
-// ── DOM ───────────────────────────────────────────────────────────
-const msgsEl = document.getElementById('msgs');
-const wEl    = document.getElementById('welcome');
-const inpEl  = document.getElementById('inp');
-const sendEl = document.getElementById('send');
-const dotEl  = document.getElementById('dot');
-const stxtEl = document.getElementById('stxt');
-const scb    = document.getElementById('scb');
-const ov     = document.getElementById('ov');
-const epinp  = document.getElementById('epinp');
-const spinp  = document.getElementById('spinp');
-const stog   = document.getElementById('stog');
-const mseg   = document.getElementById('mseg');
+const msgsEl       = document.getElementById('msgs');
+const wEl          = document.getElementById('welcome');
+const inpEl        = document.getElementById('inp');
+const sendEl       = document.getElementById('send');
+const scb          = document.getElementById('scb');
+const ov           = document.getElementById('ov');
+const epinp        = document.getElementById('epinp');
+const spinp        = document.getElementById('spinp');
+const stog         = document.getElementById('stog');
+const mseg         = document.getElementById('mseg');
+const convList     = document.getElementById('conv-list');
+const sidebar      = document.getElementById('sidebar');
+const overlayMask  = document.getElementById('overlay-mask');
+const sbDot        = document.getElementById('sb-dot');
+const sbStxt       = document.getElementById('sb-stxt');
+const convNameDisp = document.getElementById('conv-name-display');
 
-// ── Theme ─────────────────────────────────────────────────────────
 function initTheme() {
   const saved = localStorage.getItem('onx-theme');
   S.theme = saved || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light');
@@ -761,22 +991,117 @@ function initTheme() {
 }
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
-  document.getElementById('i-sun').classList.toggle('hidden', t !== 'dark');
-  document.getElementById('i-moon').classList.toggle('hidden', t !== 'light');
+  const isDark = t === 'dark';
+  [['i-sun','i-moon'],['i-sun-m','i-moon-m'],['i-sun-d','i-moon-d'],['sb-sun','sb-moon']].forEach(([s,m])=>{
+    document.getElementById(s)?.classList.toggle('hidden', !isDark);
+    document.getElementById(m)?.classList.toggle('hidden', isDark);
+  });
+  const lbl = document.getElementById('theme-label');
+  if(lbl) lbl.textContent = isDark ? 'Light mode' : 'Dark mode';
 }
-document.getElementById('tbtn').onclick = () => {
+function toggleTheme() {
   S.theme = S.theme === 'dark' ? 'light' : 'dark';
   applyTheme(S.theme);
   localStorage.setItem('onx-theme', S.theme);
-};
+}
+document.getElementById('theme-btn-sb').onclick   = toggleTheme;
+document.getElementById('tbtn-mobile').onclick    = toggleTheme;
+document.getElementById('tbtn-desktop').onclick   = toggleTheme;
 
-// ── Status ────────────────────────────────────────────────────────
 function setStatus(s, txt) {
-  dotEl.className = `dot${s==='on'?'':s==='wait'?' wait':' off'}`;
-  stxtEl.textContent = txt;
+  const cls = s==='on' ? '' : s==='wait' ? ' wait' : ' off';
+  sbDot.className = `sb-status-dot${cls}`;
+  sbStxt.textContent = txt;
 }
 
-// ── Input auto-resize ─────────────────────────────────────────────
+document.getElementById('menu-btn').onclick = openSidebar;
+overlayMask.onclick = closeSidebar;
+
+function openSidebar() {
+  sidebar.classList.add('open');
+  overlayMask.classList.add('show');
+}
+function closeSidebar() {
+  sidebar.classList.remove('open');
+  overlayMask.classList.remove('show');
+}
+
+function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6) }
+
+function createSession(title) {
+  const sess = { id: genId(), title: title || 'New session', msgs: [], ts: Date.now() };
+  S.sessions.unshift(sess);
+  S.activeSession = sess.id;
+  renderSessions();
+  saveSettings();
+  return sess;
+}
+
+function switchSession(id) {
+  S.activeSession = id;
+  const sess = S.sessions.find(s => s.id === id);
+  if (!sess) return;
+  S.msgs = sess.msgs;
+  di = 0; S.busy = false;
+  msgsEl.querySelectorAll('.msg,.msg-divider').forEach(e => e.remove());
+  const tr = document.getElementById('typing-row'); if(tr) tr.remove();
+  if (S.msgs.length === 0) {
+    wEl.classList.remove('hidden');
+  } else {
+    wEl.classList.add('hidden');
+    S.msgs.forEach(m => renderExistingMsg(m.role, m.content));
+  }
+  convNameDisp.textContent = sess.title;
+  renderSessions();
+  closeSidebar();
+  setStatus('on', 'ready');
+}
+
+function deleteSession(id, e) {
+  e.stopPropagation();
+  S.sessions = S.sessions.filter(s => s.id !== id);
+  if (S.activeSession === id) {
+    S.msgs = [];
+    S.activeSession = null;
+    msgsEl.querySelectorAll('.msg,.msg-divider').forEach(e2 => e2.remove());
+    const tr = document.getElementById('typing-row'); if(tr) tr.remove();
+    wEl.classList.remove('hidden');
+    convNameDisp.textContent = 'New session';
+  }
+  renderSessions();
+  saveSettings();
+}
+
+function renderSessions() {
+  if (S.sessions.length === 0) {
+    convList.innerHTML = `<div class="sb-empty"><div class="sb-empty-icon">◎</div>No sessions yet.<br>Start a new chat above.</div>`;
+    return;
+  }
+  convList.innerHTML = S.sessions.map(sess => `
+    <div class="conv-item${S.activeSession === sess.id ? ' active' : ''}" onclick="switchSession('${sess.id}')" data-id="${sess.id}">
+      <div class="conv-dot"></div>
+      <span class="conv-title">${esc(sess.title)}</span>
+      <button class="conv-del" onclick="deleteSession('${sess.id}', event)" title="Delete">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+document.getElementById('newchat-btn').onclick = () => {
+  createSession('New session');
+  S.msgs = [];
+  msgsEl.querySelectorAll('.msg,.msg-divider').forEach(e => e.remove());
+  const tr = document.getElementById('typing-row'); if(tr) tr.remove();
+  wEl.classList.remove('hidden');
+  convNameDisp.textContent = 'New session';
+  S.aiMsgEl = null;
+  closeSidebar();
+  setTimeout(() => inpEl.focus(), 100);
+};
+
 inpEl.addEventListener('input', () => {
   inpEl.style.height = 'auto';
   inpEl.style.height = Math.min(inpEl.scrollHeight, 140) + 'px';
@@ -787,7 +1112,6 @@ inpEl.addEventListener('keydown', e => {
 });
 sendEl.onclick = send;
 
-// ── Scroll ────────────────────────────────────────────────────────
 msgsEl.addEventListener('scroll', () => {
   S.atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 50;
   scb.classList.toggle('show', !S.atBottom && S.msgs.length > 0);
@@ -798,7 +1122,6 @@ function scrollBottom() {
   msgsEl.scrollTo({ top: msgsEl.scrollHeight, behavior: 'smooth' });
 }
 
-// ── Helpers ───────────────────────────────────────────────────────
 function nowTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -806,53 +1129,198 @@ function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function md(raw) {
+  if (!raw) return '';
   let t = raw;
-  t = t.replace(/```(\w*)\n?([\s\S]*?)```/g,(_, _l, c)=>`<pre><code>${esc(c.trim())}</code></pre>`);
-  t = t.replace(/`([^`]+)`/g,(_,c)=>`<code>${esc(c)}</code>`);
-  t = t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-  t = t.replace(/\*(.+?)\*/g,'<em>$1</em>');
-  return t.split(/\n\n+/).map(p=>p.startsWith('<pre>')?p:`<p>${p.replace(/\n/g,'<br>')}</p>`).join('');
+  const blocks = [];
+  t = t.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const id = `\x00CB${blocks.length}\x00`;
+    blocks.push(`<pre><code${lang ? ` class="lang-${esc(lang)}"` : ''}>${esc(code.trim())}</code></pre>`);
+    return id;
+  });
+  t = t.replace(/`([^`]+)`/g, (_, c) => {
+    const id = `\x00IC${blocks.length}\x00`;
+    blocks.push(`<code>${esc(c)}</code>`);
+    return id;
+  });
+  t = esc(t);
+  t = t.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+  t = t.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+  t = t.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  t = t.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  t = t.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  t = t.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  t = t.replace(/^---+$/gm, '<hr>');
+  t = t.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+  t = t.replace(/^[*-] (.+)$/gm, '<li>$1</li>');
+  t = t.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+  t = t.replace(/(?:<li>.*?<\/li>\n?)+/g, '<ul>$&</ul>');
+  t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  t = t.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  blocks.forEach((html, i) => { t = t.replace(`\x00CB${i}\x00`, html); });
+  blocks.forEach((html, i) => { t = t.replace(`\x00IC${i}\x00`, html); });
+  return t.split(/\n\n+/).map(p => {
+    if (/^\s*<(pre|h[1-6]|hr|blockquote|ul|ol)/.test(p)) return p;
+    return `<p>${p.replace(/\n/g, '<br>')}</p>`;
+  }).join('');
+}
+function mdInline(raw) {
+  if (!raw) return '';
+  let t = esc(raw);
+  t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  t = t.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  t = t.replace(/\n/g, '<br>');
+  return t;
 }
 
-// ── Add message ───────────────────────────────────────────────────
-function addMsg(role, content) {
+// ── Add user message ────────────────────────────────────────────
+function addUserMsg(content) {
   if (!wEl.classList.contains('hidden')) wEl.classList.add('hidden');
-  S.msgs.push({ role, content, ts: new Date() });
+  const msgObj = { role: 'user', content, ts: new Date() };
+  S.msgs.push(msgObj);
 
-  const el = document.createElement('div');
-  el.className = `msg ${role}`;
-
-  if (role === 'ai') {
-    const tag = document.createElement('div');
-    tag.className = 'msg-tag'; tag.textContent = 'NX';
-    const body = document.createElement('div');
-    body.className = 'msg-body';
-    body.innerHTML = md(content);
-    const time = document.createElement('div');
-    time.className = 'msg-time'; time.textContent = nowTime();
-    el.appendChild(tag); el.appendChild(body); el.appendChild(time);
-  } else {
-    const bub = document.createElement('div');
-    bub.className = 'user-bubble';
-    bub.innerHTML = `<p>${esc(content).replace(/\n/g,'<br>')}</p>`;
-    const time = document.createElement('div');
-    time.className = 'msg-time'; time.textContent = nowTime();
-    time.style.marginTop = '4px';
-    el.appendChild(bub); el.appendChild(time);
+  if (S.activeSession) {
+    const sess = S.sessions.find(s => s.id === S.activeSession);
+    if (sess && sess.title === 'New session') {
+      sess.title = content.length > 36 ? content.slice(0,34) + '…' : content;
+      convNameDisp.textContent = sess.title;
+      renderSessions();
+    }
+    if (sess) sess.msgs = S.msgs.slice();
   }
 
+  const el = document.createElement('div');
+  el.className = 'msg user';
+  const inner = document.createElement('div');
+  inner.className = 'msg-inner';
+  inner.innerHTML = `
+    <div class="user-row">
+      <div class="user-bubble"><p>${esc(content).replace(/\n/g,'<br>')}</p></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:4px">
+      <div class="msg-meta">${nowTime()}</div>
+    </div>`;
+  el.appendChild(inner);
   msgsEl.appendChild(el);
   if (S.atBottom) scrollBottom();
+}
+
+// ── AI message with live update ─────────────────────────────────
+function createLiveAIMsg() {
+  const el = document.createElement('div');
+  el.className = 'msg ai';
+  el.id = 'live-ai-msg';
+  const inner = document.createElement('div');
+  inner.className = 'msg-inner';
+  inner.innerHTML = `
+    <div class="ai-row">
+      <div class="ai-avatar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <div class="ai-content">
+        <div class="ai-label">NX</div>
+        <div class="msg-body" id="live-ai-body"></div>
+      </div>
+    </div>`;
+  el.appendChild(inner);
+  msgsEl.appendChild(el);
+  S.aiMsgEl = el;
   return el;
 }
 
-// ── Typing ────────────────────────────────────────────────────────
+let _streamTimer = null;
+let _streamContent = '';
+
+function updateLiveAIMsg(content) {
+  _streamContent = content;
+  if (_streamTimer) return;
+  _streamTimer = requestAnimationFrame(() => {
+    _streamTimer = null;
+    const body = document.getElementById('live-ai-body');
+    if (body) body.innerHTML = mdInline(_streamContent);
+    if (S.atBottom) scrollBottom();
+  });
+}
+
+function finalizeAIMsg(content) {
+  const body = document.getElementById('live-ai-body');
+  if (body) body.innerHTML = md(content);
+
+  // Add timestamp
+  const el = S.aiMsgEl || document.getElementById('live-ai-msg');
+  if (el) {
+    const inner = el.querySelector('.ai-content');
+    if (inner) {
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      meta.textContent = nowTime();
+      inner.appendChild(meta);
+    }
+    el.id = '';
+  }
+  S.aiMsgEl = null;
+
+  // Save to state
+  const msgObj = { role: 'ai', content, ts: new Date() };
+  S.msgs.push(msgObj);
+  if (S.activeSession) {
+    const sess = S.sessions.find(s => s.id === S.activeSession);
+    if (sess) sess.msgs = S.msgs.slice();
+  }
+  saveSettings();
+}
+
+function renderExistingMsg(role, content) {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  if (role === 'ai') {
+    const inner = document.createElement('div');
+    inner.className = 'msg-inner';
+    inner.innerHTML = `
+      <div class="ai-row">
+        <div class="ai-avatar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="ai-content">
+          <div class="ai-label">NX</div>
+          <div class="msg-body">${md(content)}</div>
+          <div class="msg-meta">${nowTime()}</div>
+        </div>
+      </div>`;
+    el.appendChild(inner);
+  } else {
+    const inner = document.createElement('div');
+    inner.className = 'msg-inner';
+    inner.innerHTML = `
+      <div class="user-row">
+        <div class="user-bubble"><p>${esc(content).replace(/\n/g,'<br>')}</p></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:4px">
+        <div class="msg-meta">${nowTime()}</div>
+      </div>`;
+    el.appendChild(inner);
+  }
+  msgsEl.appendChild(el);
+}
+
 function showTyping() {
   S.busy = true;
   const r = document.createElement('div');
-  r.id = 'typing-row'; r.className = '';
-  r.innerHTML = '<div class="t-tag">NX</div><div class="t-dots"><span class="t-dot"></span><span class="t-dot"></span><span class="t-dot"></span></div>';
-  r.style.cssText = 'padding:14px 0;border-bottom:1px solid var(--b1);display:grid;grid-template-columns:28px 1fr;column-gap:12px;align-items:center;animation:msg-in .2s var(--e) both';
+  r.id = 'typing-row';
+  r.innerHTML = `
+    <div class="typing-inner">
+      <div class="t-tag">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <div class="t-dots"><span class="t-dot"></span><span class="t-dot"></span><span class="t-dot"></span></div>
+    </div>`;
   msgsEl.appendChild(r);
   if (S.atBottom) scrollBottom();
 }
@@ -862,12 +1330,13 @@ function hideTyping() {
   if (el) el.remove();
 }
 
-// ── Send ──────────────────────────────────────────────────────────
+// ── Send ────────────────────────────────────────────────────────
 async function send() {
   const txt = inpEl.value.trim();
   if (!txt || S.busy) return;
   inpEl.value = ''; inpEl.style.height = 'auto'; sendEl.disabled = true;
-  addMsg('user', txt);
+  if (!S.activeSession) createSession('New session');
+  addUserMsg(txt);
   await respond(txt);
 }
 function qsend(t) { inpEl.value = t; send(); }
@@ -879,7 +1348,7 @@ async function respond(msg) {
     if (S.mode === 'demo') {
       await new Promise(r => setTimeout(r, 480 + Math.random() * 640));
       hideTyping();
-      addMsg('ai', DR[di++ % DR.length]);
+      finalizeAIMsg(DR[di++ % DR.length]);
     } else if (S.mode === 'websocket') {
       await wsCall(msg);
     } else {
@@ -888,109 +1357,217 @@ async function respond(msg) {
     setStatus('on', 'ready');
   } catch(e) {
     hideTyping();
-    addMsg('ai', `⚠ ${e.message}`);
+    finalizeAIMsg(`⚠ ${e.message}`);
     setStatus('off', 'error');
   }
 }
 
+// ── WebSocket with live streaming ───────────────────────────────
 function wsCall(msg) {
   return new Promise((res, rej) => {
     if (!S.endpoint) { rej(new Error('No endpoint set')); return; }
-    let buf='', done=false;
+    let buf = '', done = false, created = false;
     const ws = new WebSocket(S.endpoint);
-    ws.onopen = () => ws.send(JSON.stringify({type:'message',role:'user',content:msg,system:S.sys}));
+    ws.onopen = () => {
+      const body = { type: 'message', role: 'user', content: msg, system: S.sys };
+      const msgs = S.msgs.slice(-12, -1).map(m => ({
+        role: m.role === 'ai' ? 'assistant' : 'user',
+        content: m.content
+      }));
+      if (msgs.length) body.messages = msgs;
+      ws.send(JSON.stringify(body));
+    };
     ws.onmessage = e => {
       try {
         const d = JSON.parse(e.data);
-        if (d.type==='chunk') { buf+=d.content; }
-        else if (d.type==='done'||d.type==='message') {
-          if(d.content) buf=d.content; done=true;
-          hideTyping(); addMsg('ai', buf||'—'); ws.close(); res();
-        } else if(d.type==='error') { rej(new Error(d.message||'Error')); ws.close(); }
-      } catch { buf+=e.data; }
+        if (d.type === 'chunk') {
+          buf += d.content;
+          if (!created) { hideTyping(); createLiveAIMsg(); created = true; }
+          updateLiveAIMsg(buf);
+        } else if (d.type === 'done') {
+          done = true;
+          if (d.content) buf = d.content;
+          if (!created) { hideTyping(); createLiveAIMsg(); }
+          finalizeAIMsg(buf || '—');
+          ws.close(); res();
+        } else if (d.type === 'error') {
+          rej(new Error(d.message || 'Error')); ws.close();
+        }
+      } catch {
+        if (!created) { hideTyping(); createLiveAIMsg(); created = true; }
+        buf += e.data;
+        updateLiveAIMsg(buf);
+      }
     };
     ws.onerror = () => rej(new Error('WebSocket failed'));
-    ws.onclose = () => { if(!done&&buf){hideTyping();addMsg('ai',buf);res();} };
-    setTimeout(()=>{ if(!done){ws.close();done=true;hideTyping();buf?addMsg('ai',buf)&&res():rej(new Error('Timeout'));} },30000);
+    ws.onclose = () => {
+      if (!done && buf) {
+        if (!created) { hideTyping(); createLiveAIMsg(); created = true; }
+        finalizeAIMsg(buf); res();
+      }
+    };
+    setTimeout(() => {
+      if (!done) {
+        ws.close(); done = true;
+        if (!created) { hideTyping(); createLiveAIMsg(); created = true; }
+        buf ? finalizeAIMsg(buf) && res() : rej(new Error('Timeout'));
+      }
+    }, 120000);
   });
 }
 
+// ── REST (SSE streaming) ────────────────────────────────────────
 async function restCall(msg) {
   if (!S.endpoint) throw new Error('No endpoint set');
-  const r = await fetch(S.endpoint, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({message:msg,messages:S.msgs.slice(-12).map(m=>({role:m.role==='ai'?'assistant':'user',content:m.content})),system:S.sys}),
-    signal: AbortSignal.timeout(30000)
+  const msgs = S.msgs.slice(-10).map(m => ({
+    role: m.role === 'ai' ? 'assistant' : 'user',
+    content: m.content
+  }));
+
+  const response = await fetch(S.endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: msg,
+      messages: msgs,
+      system: S.sys,
+      stream: true
+    }),
+    signal: AbortSignal.timeout(120000)
   });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const d = await r.json();
-  hideTyping();
-  addMsg('ai', d.content||d.message||d.response||d.text||JSON.stringify(d));
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', content = '', created = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.done) {
+            if (data.content) content = data.content;
+          } else if (data.token !== undefined) {
+            content += data.token;
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+    if (content) {
+      if (!created) { hideTyping(); createLiveAIMsg(); created = true; }
+      updateLiveAIMsg(content);
+    }
+  }
+
+  if (!created) { hideTyping(); createLiveAIMsg(); created = true; }
+  finalizeAIMsg(content || '—');
 }
 
-// ── Auto-connect to server ─────────────────────────────────────────
-function autoConnect() {
-  const host = location.hostname;
-  const port = location.port || '8765';
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  S.mode = 'websocket';
-  S.endpoint = `${proto}//${host}:${port}/ws`;
-  document.querySelectorAll('.sb').forEach(b => b.classList.toggle('on', b.dataset.mode === S.mode));
-}
-
-// ── Settings ──────────────────────────────────────────────────────
-document.getElementById('sbtn').onclick = openPane;
-ov.addEventListener('click', e => { if(e.target===ov) closePane(); });
+// ── Settings ─────────────────────────────────────────────────────
+[document.getElementById('sbtn-foot'),
+ document.getElementById('sbtn-mobile'),
+ document.getElementById('sbtn-desktop')].forEach(b => {
+  if (b) b.onclick = openPane;
+});
+ov.addEventListener('click', e => { if (e.target === ov) closePane(); });
 
 function openPane() {
   epinp.value = S.endpoint;
   spinp.value = S.sys;
-  stog.className = `tog${S.stream?' on':''}`;
-  document.querySelectorAll('.sb').forEach(b=>b.classList.toggle('on', b.dataset.mode===S.mode));
+  stog.className = `tog${S.stream ? ' on' : ''}`;
+  document.querySelectorAll('.sb').forEach(b => b.classList.toggle('on', b.dataset.mode === S.mode));
   ov.classList.add('open');
 }
 function closePane() { ov.classList.remove('open'); }
 
 mseg.addEventListener('click', e => {
-  const b = e.target.closest('.sb'); if(!b) return;
-  document.querySelectorAll('.sb').forEach(x=>x.classList.remove('on'));
+  const b = e.target.closest('.sb'); if (!b) return;
+  document.querySelectorAll('.sb').forEach(x => x.classList.remove('on'));
   b.classList.add('on'); S.mode = b.dataset.mode;
 });
-
-stog.onclick = () => { S.stream=!S.stream; stog.className=`tog${S.stream?' on':''}`; };
-
+stog.onclick = () => { S.stream = !S.stream; stog.className = `tog${S.stream ? ' on' : ''}`; };
 document.getElementById('applybtn').onclick = () => {
   S.endpoint = epinp.value.trim();
   if (spinp.value.trim()) S.sys = spinp.value.trim();
   saveSettings(); closePane();
 };
-
 document.getElementById('clrbtn').onclick = () => {
-  S.msgs=[]; di=0; S.busy=false;
-  msgsEl.querySelectorAll('.msg').forEach(e=>e.remove());
-  const tr = document.getElementById('typing-row'); if(tr) tr.remove();
+  S.msgs = [];
+  if (S.activeSession) {
+    const sess = S.sessions.find(s => s.id === S.activeSession);
+    if (sess) { sess.msgs = []; sess.title = 'New session'; }
+    convNameDisp.textContent = 'New session';
+    renderSessions();
+  }
+  di = 0; S.busy = false; S.aiMsgEl = null;
+  msgsEl.querySelectorAll('.msg,.msg-divider').forEach(e => e.remove());
+  const tr = document.getElementById('typing-row'); if (tr) tr.remove();
   wEl.classList.remove('hidden');
-  setStatus('on','ready'); closePane();
+  setStatus('on', 'ready'); closePane();
 };
 
-// ── Persist ───────────────────────────────────────────────────────
+// ── Auto-connect ────────────────────────────────────────────────
+function autoConnect() {
+  const host = location.hostname;
+  const port = location.port || '8765';
+  S.mode = 'websocket';
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  S.endpoint = `${proto}//${host}:${port}/ws`;
+  document.querySelectorAll('.sb').forEach(b => b.classList.toggle('on', b.dataset.mode === S.mode));
+}
+
+// ── Persist ─────────────────────────────────────────────────────
 function saveSettings() {
-  localStorage.setItem('onx-cfg', JSON.stringify({mode:S.mode,endpoint:S.endpoint,sys:S.sys,stream:S.stream}));
+  localStorage.setItem('onx-cfg', JSON.stringify({
+    mode: S.mode, endpoint: S.endpoint, sys: S.sys, stream: S.stream,
+    sessions: S.sessions, activeSession: S.activeSession
+  }));
 }
 function loadSettings() {
   try {
-    const d = JSON.parse(localStorage.getItem('onx-cfg')||'{}');
-    if(d.mode) S.mode=d.mode;
-    if(d.endpoint) S.endpoint=d.endpoint;
-    if(d.sys) S.sys=d.sys;
-    if('stream' in d) S.stream=d.stream;
+    const d = JSON.parse(localStorage.getItem('onx-cfg') || '{}');
+    if (d.mode) S.mode = d.mode;
+    if (d.endpoint) S.endpoint = d.endpoint;
+    if (d.sys) S.sys = d.sys;
+    if ('stream' in d) S.stream = d.stream;
+    if (d.sessions && Array.isArray(d.sessions)) S.sessions = d.sessions;
+    if (d.activeSession) S.activeSession = d.activeSession;
   } catch {}
 }
 window.addEventListener('beforeunload', saveSettings);
 
-// ── Boot ──────────────────────────────────────────────────────────
-initTheme(); autoConnect(); loadSettings(); setStatus('on','ready');
-setTimeout(()=>inpEl.focus(), 200);
+// ── Boot ────────────────────────────────────────────────────────
+initTheme();
+autoConnect();
+loadSettings();
+// Migrate old "Orin NX" system prompt to medical default
+const oldPrompt = 'You are Orin NX, a sophisticated edge AI inference agent running on an NVIDIA Jetson Orin NX. You specialize in on-device ML inference, edge computing, and embedded systems. Be concise and technical.';
+if (S.sys === oldPrompt) {
+  S.sys = 'You are a medical assistant. Answer questions about symptoms, conditions, and treatments based on medical knowledge.';
+  saveSettings();
+}
+renderSessions();
+
+if (S.activeSession) {
+  const sess = S.sessions.find(s => s.id === S.activeSession);
+  if (sess && sess.msgs && sess.msgs.length > 0) {
+    S.msgs = sess.msgs;
+    wEl.classList.add('hidden');
+    S.msgs.forEach(m => renderExistingMsg(m.role, m.content));
+    convNameDisp.textContent = sess.title;
+    setTimeout(scrollBottom, 50);
+  }
+}
+
+setStatus('on', 'ready');
+setTimeout(() => inpEl.focus(), 200);
 </script>
 </body>
 </html>

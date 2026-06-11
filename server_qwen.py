@@ -35,10 +35,22 @@ sock = Sock(app)
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-def build_prompt(user_msg: str, system: str = "") -> str:
+def build_prompt(
+    user_msg: str,
+    system: str = "",
+    messages: list[dict] | None = None,
+) -> str:
     parts = []
     if system:
         parts.append(f"<|im_start|>system\n{system}<|im_end|>")
+    if messages:
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role == "assistant":
+                parts.append(f"<|im_start|>assistant\n{content}<|im_end|>")
+            else:
+                parts.append(f"<|im_start|>user\n{content}<|im_end|>")
     parts.append(f"<|im_start|>user\n{user_msg}<|im_end|>")
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
@@ -58,7 +70,7 @@ def _extract_response(raw: str) -> str:
 
 
 def stream_tokens(prompt: str, max_tokens: int = 512):
-    """Yield token strings from llama-cli one at a time."""
+    """Yield token strings from llama-cli as they are generated (line-wise streaming)."""
     cmd = [
         LLAMA_CLI,
         "-m", MODEL,
@@ -78,13 +90,32 @@ def stream_tokens(prompt: str, max_tokens: int = 512):
         text=True,
         bufsize=1,
     )
-    full = proc.stdout.read()
-    proc.stdout.close()
-    proc.wait()
-    chars = list(_extract_response(full))
-    log.info(f"Generation done, {len(chars)} chars, exit={proc.returncode}")
-    for ch in chars:
-        yield ch
+
+    n_expected = prompt.count("<|im_start|>assistant\n")
+    assistant_count = 0
+    in_response = False
+    chars = 0
+
+    for line in iter(proc.stdout.readline, ""):
+        if in_response:
+            if line.startswith("[ Prompt:") or line.startswith("Exiting"):
+                break
+            for ch in line:
+                chars += 1
+                yield ch
+            continue
+
+        if line.startswith("<|im_start|>assistant\n"):
+            assistant_count += 1
+            if assistant_count >= n_expected:
+                next_line = proc.stdout.readline()
+                if not next_line:
+                    break
+                if not next_line.strip():
+                    in_response = True
+                elif next_line.startswith("[ Prompt:") or next_line.startswith("Exiting"):
+                    break
+            continue
 
 
 # ── Routes ───────────────────────────────────────────────────────────
@@ -106,8 +137,9 @@ def chat():
     user_msg = data.get("message", data.get("content", ""))
     system = data.get("system", "")
     stream = data.get("stream", True)
+    messages = data.get("messages")
 
-    prompt = build_prompt(user_msg, system)
+    prompt = build_prompt(user_msg, system, messages)
 
     if not stream:
         full = "".join(stream_tokens(prompt))
@@ -146,8 +178,9 @@ def ws_chat(ws):
 
         user_msg = data.get("content", "")
         system = data.get("system", "")
+        messages = data.get("messages")
 
-        prompt = build_prompt(user_msg, system)
+        prompt = build_prompt(user_msg, system, messages)
         buf = []
 
         for token in stream_tokens(prompt):

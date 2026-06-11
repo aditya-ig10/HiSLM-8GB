@@ -181,7 +181,12 @@ python train_a5000.py
 
 - `static/index.html` — Sci-fi terminal chat UI (used by AGX server)
 - `static/nx_index.html` — Wireless NX client UI
-- `orin_index.html` — Standalone chat UI for Qwen server
+- `orin_index.html` — Standalone chat UI for the Qwen server with:
+  - **Session management** — create, switch, and delete chat sessions from the sidebar
+  - **Multi-turn context** — last 10 messages sent with each request for coherent conversation
+  - **Live streaming** — tokens appear character-by-character as the model generates (both WebSocket and REST modes)
+  - **Dark/light theme** — persisted across sessions
+  - **Three modes** — demo, WebSocket, and REST (SSE streaming)
 
 ## LoRA Conversion (PEFT -> GGUF)
 
