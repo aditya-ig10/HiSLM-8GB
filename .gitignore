@@ -23,6 +23,9 @@ models/.cache/
 # Training outputs (regeneratable)
 output/
 
+# Training artifacts (regeneratable)
+trained/
+
 # Empty cache dir
 cache/
 

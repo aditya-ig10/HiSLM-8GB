@@ -19,7 +19,10 @@ logging.basicConfig(
 log = logging.getLogger("qwen-server")
 
 MODEL = os.path.expanduser(
-    "~/llama/HiSLM-8G/models/qwen2.5-3b-instruct-q4_k_m.gguf"
+    "~/llama/HiSLM-8G/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+)
+LORA_MODEL = os.path.expanduser(
+    "~/llama/HiSLM-8G/models/medical-lora-qwen2.5-1.5b.gguf"
 )
 LLAMA_CLI = os.path.expanduser(
     "~/llama/llama.cpp/build-x64-linux-gcc-release/bin/llama-cli"
@@ -41,14 +44,29 @@ def build_prompt(user_msg: str, system: str = "") -> str:
     return "\n".join(parts)
 
 
+def _extract_response(raw: str) -> str:
+    """Strip banner, prompt echo, and stats from llama-cli output."""
+    # Remove everything up to and including the prompt echo
+    idx = raw.rfind("<|im_start|>assistant\n\n")
+    if idx >= 0:
+        raw = raw[idx + len("<|im_start|>assistant\n\n"):]
+    # Remove stats footer
+    idx = raw.find("\n[ Prompt:")
+    if idx >= 0:
+        raw = raw[:idx]
+    return raw.strip()
+
+
 def stream_tokens(prompt: str, max_tokens: int = 512):
     """Yield token strings from llama-cli one at a time."""
     cmd = [
         LLAMA_CLI,
         "-m", MODEL,
+        "--lora", LORA_MODEL,
         "-p", prompt,
         "-n", str(max_tokens),
         "--no-display-prompt",
+        "--single-turn",
         "--simple-io",
         "-c", "4096",
     ]
@@ -60,16 +78,13 @@ def stream_tokens(prompt: str, max_tokens: int = 512):
         text=True,
         bufsize=1,
     )
-    full = []
-    for line in iter(proc.stdout.readline, ""):
-        if not line:
-            break
-        for ch in line:
-            full.append(ch)
-            yield ch
+    full = proc.stdout.read()
     proc.stdout.close()
     proc.wait()
-    log.info(f"Generation done, {len(full)} chars, exit={proc.returncode}")
+    chars = list(_extract_response(full))
+    log.info(f"Generation done, {len(chars)} chars, exit={proc.returncode}")
+    for ch in chars:
+        yield ch
 
 
 # ── Routes ───────────────────────────────────────────────────────────
