@@ -1,3 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Python virtual environment
 venv/
-torch-2.1.0-jetson.whl
-client.log
+.venv/
+
+# Logs
+*.log
+
+# Dataset files (large, not for version control)
+dataset/
+
+# Model files (large binary blobs)
+models/
+models/.cache/
+
+# Training outputs (regeneratable)
+output/
+
+# Empty cache dir
+cache/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PyTorch wheels
+*.whl
+
+# Temporary files
+*.tmp
+*.bak
