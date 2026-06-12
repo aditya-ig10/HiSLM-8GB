@@ -21,9 +21,6 @@ log = logging.getLogger("qwen-server")
 MODEL = os.path.expanduser(
     "~/llama/HiSLM-8G/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
 )
-LORA_MODEL = os.path.expanduser(
-    "~/llama/HiSLM-8G/models/medical-lora-qwen2.5-1.5b.gguf"
-)
 LLAMA_CLI = os.path.expanduser(
     "~/llama/llama.cpp/build-x64-linux-gcc-release/bin/llama-cli"
 )
@@ -57,24 +54,52 @@ def build_prompt(
 
 
 def _extract_response(raw: str) -> str:
-    """Strip banner, prompt echo, and stats from llama-cli output."""
-    # Remove everything up to and including the prompt echo
-    idx = raw.rfind("<|im_start|>assistant\n\n")
-    if idx >= 0:
-        raw = raw[idx + len("<|im_start|>assistant\n\n"):]
-    # Remove stats footer
-    idx = raw.find("\n[ Prompt:")
-    if idx >= 0:
-        raw = raw[:idx]
-    return raw.strip()
+    """Strip banner, prompt echo, and stats from llama-cli output.
+    Works around echo truncation (--single-turn drops <|im_end|>
+    for assistant content and may truncate the last user/assistant turn)."""
+    lines = raw.split("\n")
+
+    # Find the LAST <|im_start|>assistant header in the echo
+    last_asst = -1
+    for i, line in enumerate(lines):
+        if line.startswith("<|im_start|>assistant"):
+            last_asst = i
+
+    if last_asst < 0:
+        return ""
+
+    # After the last echoed assistant header, find the first blank line
+    # (the separator between echo and generation)
+    sep = -1
+    for i in range(last_asst + 1, len(lines)):
+        if not lines[i].strip():
+            sep = i
+            break
+
+    if sep < 0:
+        return ""
+
+    # Everything between the separator and [ Prompt: is the generation
+    gen_lines = []
+    for j in range(sep + 1, len(lines)):
+        if lines[j].startswith("[ Prompt:") or lines[j].startswith("Exiting"):
+            break
+        gen_lines.append(lines[j])
+
+    return "\n".join(gen_lines).strip()
 
 
 def stream_tokens(prompt: str, max_tokens: int = 512):
-    """Yield token strings from llama-cli as they are generated (line-wise streaming)."""
+    """Yield token strings from llama-cli output.
+
+    Reads all output, extracts the generation, then yields character-by-character.
+    Uses buffered extraction because llama-cli's --single-turn echo truncates
+    content and drops <|im_end|> for assistant turns, making line-by-line
+    state machines unreliable.
+    """
     cmd = [
         LLAMA_CLI,
         "-m", MODEL,
-        "--lora", LORA_MODEL,
         "-p", prompt,
         "-n", str(max_tokens),
         "--no-display-prompt",
@@ -82,40 +107,19 @@ def stream_tokens(prompt: str, max_tokens: int = 512):
         "--simple-io",
         "-c", "4096",
     ]
-    log.info(f"Spawning: {' '.join(cmd[-8:])}")
+    log.info(f"Spawning: {' '.join(cmd[-6:])}")
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
-        bufsize=1,
     )
+    out, _ = proc.communicate()
+    proc.wait()
 
-    n_expected = prompt.count("<|im_start|>assistant\n")
-    assistant_count = 0
-    in_response = False
-    chars = 0
-
-    for line in iter(proc.stdout.readline, ""):
-        if in_response:
-            if line.startswith("[ Prompt:") or line.startswith("Exiting"):
-                break
-            for ch in line:
-                chars += 1
-                yield ch
-            continue
-
-        if line.startswith("<|im_start|>assistant\n"):
-            assistant_count += 1
-            if assistant_count >= n_expected:
-                next_line = proc.stdout.readline()
-                if not next_line:
-                    break
-                if not next_line.strip():
-                    in_response = True
-                elif next_line.startswith("[ Prompt:") or next_line.startswith("Exiting"):
-                    break
-            continue
+    response = _extract_response(out)
+    for ch in response:
+        yield ch
 
 
 # ── Routes ───────────────────────────────────────────────────────────
@@ -146,8 +150,10 @@ def chat():
         return jsonify({"content": full.strip()})
 
     def generate():
-        for token in stream_tokens(prompt):
-            yield f"data: {json.dumps({'token': token})}\n\n"
+        tokens = list(stream_tokens(prompt))
+        full = "".join(tokens)
+        for i in range(0, len(full), 80):
+            yield f"data: {json.dumps({'token': full[i:i+80]})}\n\n"
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
@@ -181,14 +187,11 @@ def ws_chat(ws):
         messages = data.get("messages")
 
         prompt = build_prompt(user_msg, system, messages)
-        buf = []
 
-        for token in stream_tokens(prompt):
-            buf.append(token)
-            ws.send(json.dumps({"type": "chunk", "content": token}))
-
-        full = "".join(buf).strip()
-        ws.send(json.dumps({"type": "done", "content": full}))
+        full = "".join(stream_tokens(prompt))
+        for i in range(0, len(full), 80):
+            ws.send(json.dumps({"type": "chunk", "content": full[i:i+80]}))
+        ws.send(json.dumps({"type": "done", "content": full.strip()}))
         log.info(f"WebSocket reply done ({len(full)} chars)")
 
 

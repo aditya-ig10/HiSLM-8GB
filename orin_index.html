@@ -950,7 +950,7 @@ const S = {
   msgs: [], busy: false,
   mode: 'websocket', endpoint: '', stream: true,
   theme: 'dark', atBottom: true,
-    sys: 'You are a medical assistant. Answer questions about symptoms, conditions, and treatments based on medical knowledge.',
+    sys: 'You are a medical assistant. Analyze symptoms, suggest possible conditions, and recommend treatments. Never give generic non-medical responses. If the user greets you, acknowledge briefly then address health concerns.',
   sessions: [],
   activeSession: null,
   aiMsgEl: null
@@ -1550,7 +1550,7 @@ loadSettings();
 // Migrate old "Orin NX" system prompt to medical default
 const oldPrompt = 'You are Orin NX, a sophisticated edge AI inference agent running on an NVIDIA Jetson Orin NX. You specialize in on-device ML inference, edge computing, and embedded systems. Be concise and technical.';
 if (S.sys === oldPrompt) {
-  S.sys = 'You are a medical assistant. Answer questions about symptoms, conditions, and treatments based on medical knowledge.';
+  S.sys = 'You are a medical assistant. Analyze symptoms, suggest possible conditions, and recommend treatments. Never give generic non-medical responses. If the user greets you, acknowledge briefly then address health concerns.';
   saveSettings();
 }
 renderSessions();
