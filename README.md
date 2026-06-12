@@ -14,10 +14,23 @@ Hierarchical Small Language Model inference system for edge devices. Fine-tune a
 └──────────────────────┬──────────────────────────────┘
                        │ LAN / Tailscale
     ┌──────────────────┴──────────────────┐
-    │          Orin NX (Client)           │
-    │  client.py ── LAN mode              │
-    │  client2.py ── Tailscale mode       │
-    │  client_2.py ── Generic mode        │
+    │          Orin NX (Server)           │
+    │  ┌──────────────────────────────┐   │
+    │  │  subserver.py                │   │
+    │  │  ┌──────────┐  ┌─────────┐  │   │
+    │  │  │Classifier│→ │ Router  │  │   │
+    │  │  └──────────┘  └────┬────┘  │   │
+    │  │               │     │       │   │
+    │  │          ┌────┘     └──┐    │   │
+    │  │          ▼             ▼    │   │
+    │  │   ┌────────────┐ ┌────────┐│   │
+    │  │   │ Qwen 1.5B  │ │ AGX    ││   │
+    │  │   │ (local)    │ │ (relay)││   │
+    │  │   └────────────┘ └────────┘│   │
+    │  └──────────────────────────────┘   │
+    │                                     │
+    │  client.py / client2.py             │
+    │  (thin clients, connect to AGX)     │
     └─────────────────────────────────────┘
 ```
 
@@ -25,7 +38,9 @@ Hierarchical Small Language Model inference system for edge devices. Fine-tune a
 
 ### Inference Server (`server_qwen.py`)
 
-Flask + WebSocket server that spawns `llama-cli` as a subprocess. Serves the **Qwen2.5-1.5B-Instruct** model (GGUF, Q4_K_M) with a **medical LoRA adapter** loaded at inference time.
+Flask + WebSocket server that spawns `llama-cli` as a subprocess. Serves the **Qwen2.5-1.5B-Instruct** model (GGUF, Q4_K_M).
+
+> **Note:** The medical LoRA adapter was removed because it degraded English medical QA. The base Qwen2.5-1.5B-Instruct outperforms it for conversational English medical queries. See `BUG_ANALYSIS.md` for details.
 
 #### Quick start
 
@@ -64,17 +79,6 @@ python server_qwen.py --ngrok
 - `stream: true` (default) — returns SSE stream of character tokens
 - `stream: false` — returns JSON `{"content": "..."}`
 
-#### Model files
-
-| File | Size | Description |
-|------|------|-------------|
-| `models/qwen2.5-1.5b-instruct-q4_k_m.gguf` | 985 MB | Pre-quantized base model (HuggingFace) |
-| `models/medical-lora-qwen2.5-1.5b.gguf` | ~1 MB | LoRA adapter in GGUF format |
-| `trained/adapter_model.safetensors` | 71 MB | Original PEFT LoRA (before GGUF conversion) |
-| `trained/adapter_config.json` | 1.2 KB | LoRA hyperparameters (rank=16, alpha=32) |
-
-The LoRA adapter was fine-tuned on medical QA datasets (Med_QA, MT Samples, PubMed QA) using QLoRA. It targets all linear layers (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`) of Qwen2.5-1.5B.
-
 #### How it works
 
 **1. Prompt construction** (`build_prompt` in `server_qwen.py:38`):
@@ -93,7 +97,6 @@ Spawns llama-cli (CPU-only, aarch64 build b9453):
 ```
 llama-cli \
   -m models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
-  --lora models/medical-lora-qwen2.5-1.5b.gguf \
   -p "<|im_start|>user\n...<|im_end|>\n<|im_start|>assistant" \
   -n 512 \
   --no-display-prompt \
@@ -105,7 +108,6 @@ llama-cli \
 Key flags:
 - `--single-turn` — prevents llama-cli from entering interactive mode (without this it prints `> ` prompts in an infinite loop)
 - `--no-display-prompt` — prevents the prompt from being echoed in the output
-- `--lora` — applies the medical LoRA adapter at inference time (no merging required)
 
 **3. Response extraction** (`_extract_response` in `server_qwen.py:47`):
 
@@ -139,6 +141,52 @@ available commands:\n  ...\n\n
 
 `_extract_response` removes everything before and including `<|im_start|>assistant\n\n`, then removes `[ Prompt:` and everything after, returning only the generated text.
 
+### Hybrid Subserver (`subserver.py`)
+
+Runs on **Orin NX**. Classifies each user query and routes it to the appropriate backend:
+- **Medical queries & simple greetings** → answered locally by Qwen2.5-1.5B
+- **Non-medical / out-of-domain queries** → forwarded to AGX Orin for the more powerful Qwen2.5-3B
+
+Every response includes a `"source"` field (`"NX"` or `"AGX"`) so the UI can label where the answer came from.
+
+#### Classification
+
+Uses the local Qwen2.5-1.5B with a minimal prompt:
+```
+Is this a medical/health topic or a simple greeting?
+Answer with exactly one number: 1 for yes, 0 for no.
+```
+The model outputs a single digit (`0` or `1`), extracted via regex. If classification fails, it defaults to True (local) as a safe fallback.
+
+#### AGX relay
+
+Uses REST polling instead of WebSocket for reliability:
+1. `POST /send` — submits the query to AGX
+2. `GET /messages?limit=20` — polls every 1s until a server response appears
+3. Response forwarded back to the client with `source: "AGX"`
+
+#### Quick start
+
+```bash
+python subserver.py --agx-ip 172.16.6.21          # default port 8765
+python subserver.py --agx-ip 172.16.6.21 --port 9000
+```
+
+#### API
+
+Same surface as `server_qwen.py`, plus `source` in every response:
+
+**SSE chunk:** `{"token": "...", "source": "NX"}`
+**SSE done:**   `{"done": true, "source": "AGX", "content": "..."}`
+**WS chunk:**   `{"type": "chunk", "content": "...", "source": "AGX"}`
+**WS done:**    `{"type": "done", "content": "...", "source": "NX"}`
+
+#### Logging
+
+Every query, response, classification, and routing decision is POSTed to AGX at `/log` for centralised monitoring.
+
+
+
 ### Training (`train.py`)
 
 Fine-tunes **TinyLlama-1.1B-Chat-v1.0** on medical datasets using QLoRA (4-bit). Runs on Jetson Orin NX 8GB with unified memory.
@@ -166,6 +214,8 @@ python train.py
 | `client.py` | Connect to AGX Orin server over LAN |
 | `client_2.py` | Connect to any HiSLM server (generic) |
 | `client2.py` | Connect over Tailscale wireless |
+
+> Running `subserver.py` replaces the need for clients — they connect directly to the NX server, which handles local inference or relays to AGX automatically.
 
 ### A5000 Training Package (`a5000_training/`)
 
@@ -217,6 +267,7 @@ HiSLM-8G/
 ├── train.py                        # Main training script (QLoRA)
 ├── preprocess.py                   # Dataset preprocessing
 ├── server_qwen.py                  # Inference server (Flask + WS)
+├── subserver.py                    # Hybrid NX/AGX server (classify + route)
 ├── client.py                       # LAN client
 ├── client_2.py                     # Generic client
 ├── client2.py                      # Tailscale wireless client
