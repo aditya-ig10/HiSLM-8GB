@@ -50,9 +50,17 @@ from tqdm import tqdm
 
 BASE = Path(__file__).resolve().parent
 
+# ── CLI overrides ─────────────────────────────────────────────────
+import argparse
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--lora-r", type=int, default=8, help="LoRA rank")
+_parser.add_argument("--samples", type=int, default=500, help="Max training samples")
+_parser.add_argument("--output", type=str, default=None, help="Output subdirectory")
+_args, _ = _parser.parse_known_args()
+
 MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-LORA_R = 8
-LORA_ALPHA = 16
+LORA_R = _args.lora_r
+LORA_ALPHA = LORA_R * 2  # alpha = 2*r
 TARGET_MODULES = ["q_proj", "v_proj"]
 MAX_SEQ_LENGTH = 128
 BATCH_SIZE = 1
@@ -60,11 +68,11 @@ GRAD_ACCUM = 4
 LEARNING_RATE = 2e-4
 NUM_EPOCHS = 1
 WARMUP_STEPS = 50
-MAX_TRAIN_SAMPLES = 2000
-OUTPUT_DIR = BASE / "output"
+MAX_TRAIN_SAMPLES = _args.samples
+OUTPUT_DIR = BASE / "output" / (_args.output or f"lora_r{LORA_R}")
 LOG_STEPS = 5
-SAVE_STEPS = 200
-OUTPUT_DIR.mkdir(exist_ok=True)
+SAVE_STEPS = max(200, MAX_TRAIN_SAMPLES)  # disable intermediate checkpoints for small runs
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def format_example(example):
     user_msg = f"{example['instruction']}\n{example['input']}" if example['input'] else example['instruction']

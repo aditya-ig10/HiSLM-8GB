@@ -3,11 +3,14 @@
 subserver.py — Hybrid NX/AGX inference server
 
 Runs on Orin NX. For each user query:
-  1. Classifies it by medical-domain confidence (0 or 1).
-  2. If medical or simple greeting → answer locally via Qwen2.5-1.5B.
-  3. If non-medical (out of domain) → forward to AGX, relay response.
-  4. Logs every query + response + routing decision to AGX.
-  5. Each response includes a `source` field ("NX" or "AGX").
+  1. Classifies it with probabilitic confidence (logprob-style via score
+     + empirical sampling), KL divergence, and online k-means clustering.
+  2. If confidently medical (confidence ≥ CONFIDENCE_THRESHOLD) → answer
+     locally on NX.
+  3. Otherwise → forward to AGX, relay response.
+  4. All model ops (classify + infer) serialised through a thread-safe
+     queue to prevent resource contention on NX.
+  5. Every query + response + routing decision logged to AGX.
 
 Usage:
   python subserver.py --agx-ip 100.x.y.z             # default port 8765
@@ -16,12 +19,17 @@ Usage:
 
 import json
 import logging
+import math
 import os
+import queue
 import re
 import subprocess
+import threading
 import time
+from collections import deque
 from pathlib import Path
 
+import numpy as np
 import requests
 from flask import Flask, Response, jsonify, request, send_file
 from flask_sock import Sock
@@ -38,7 +46,11 @@ MODEL = os.path.expanduser(
 LLAMA_CLI = os.path.expanduser(
     "~/llama/llama.cpp/build-x64-linux-gcc-release/bin/llama-cli"
 )
-ORIN_HTML = os.path.join(os.path.dirname(__file__), "orin_index.html")
+try:
+    _BASE = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    _BASE = "."
+ORIN_HTML = os.path.join(_BASE, "orin_index.html")
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -47,85 +59,461 @@ agx_host: str = ""
 agx_port: int = 8000
 node_name: str = "nx-subserver"
 
-
-def agx_base_url() -> str:
-    return f"http://{agx_host}:{agx_port}"
-
+# ── Routing thresholds ───────────────────────────────────────────────
+# Only route to NX if both:
+#   1. is_medical == True
+#   2. confidence >= CONFIDENCE_THRESHOLD
+# Otherwise → AGX.
+CONFIDENCE_THRESHOLD = 0.7
 
 # ── Classification ──────────────────────────────────────────────────
 
-CLASSIFY_PROMPT = (
-    'Is the following query about a medical/health topic '
-    'or a simple greeting like "hi" / "hello"?\n'
-    "Answer with exactly one number: 1 for yes, 0 for no.\n"
-    "Do not output anything else.\n\n"
-    'Query: {query}\n'
-    "Answer: "
+MEDICAL_KEYWORDS = {
+    "symptom", "diagnosis", "treatment", "disease", "patient",
+    "medication", "dosage", "surgery", "health", "medical",
+    "clinical", "drug", "infection", "therapy", "therapist",
+    "doctor", "nurse", "hospital", "clinic", "prescription",
+    "pain", "fever", "cough", "injury", "wound", "vaccine",
+    "antibiotic", "surgery", "examination", "test result",
+    "blood", "heart", "lung", "brain", "cancer", "diabetes",
+    "hypertension", "pneumonia", "asthma", "allergy",
+    "hello", "hi", "hey", "greetings", "good morning",
+    "good evening", "good afternoon", "howdy", "how are you",
+    "what's up", "nice to meet you", "thank you", "thanks",
+}
+
+CLASSIFY_SCORE_PROMPT = (
+    "Rate the medical relevance of this query from 0.0 to 1.0.\n"
+    "0.0 = definitely NOT medical (e.g., programming, recipes)\n"
+    "0.5 = uncertain or partially related\n"
+    "1.0 = definitely medical (e.g., symptoms, diagnosis, treatment)\n"
+    "Output only the number.\n\n"
+    "Query: {query}\n"
+    "Score: "
 )
 
+# ── Probabilitic confidence helpers ─────────────────────────────────
 
-def is_medical_query(query: str) -> bool:
-    """Use local Qwen to decide if query is medical or a greeting.
+N_SAMPLES = 2              # LLM calls per classify (keyword match bypasses)
+TEMP_SCHEDULE = [0.0, 0.5]  # deterministic + mildly stochastic
 
-    Returns True → handle on NX locally.
-    Returns False → route to AGX.
-    Always returns True (local) on any error — safe default.
-    """
-    prompt = CLASSIFY_PROMPT.replace("{query}", query)
+
+def _parse_score(raw: str) -> float | None:
+    """Extract a 0.0–1.0 float from model output."""
+    m = re.search(r"([01](?:\.\d+)?|\.\d+)", raw.strip())
+    if m:
+        val = float(m.group(1))
+        if 0.0 <= val <= 1.0:
+            return val
+    m = re.search(r"[01]", raw)
+    if m:
+        return float(m.group())
+    return None
+
+
+def _run_llama_score(query: str, temp: float, timeout_s: int = 30) -> float | None:
+    """Run the classifier prompt at a given temperature and return parsed score."""
+    prompt = CLASSIFY_SCORE_PROMPT.replace("{query}", query)
     cmd = [
-        LLAMA_CLI,
-        "-m", MODEL,
+        LLAMA_CLI, "-m", MODEL,
         "-p", prompt,
         "-n", "8",
-        "--no-display-prompt",
-        "--single-turn",
-        "--simple-io",
-        "-c", "512",
+        "--no-display-prompt", "--single-turn", "--simple-io",
+        "-c", "512", "--temp", str(temp),
     ]
     try:
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
-        out, _ = proc.communicate(timeout=30)
+        out, _ = proc.communicate(timeout=timeout_s)
         proc.wait()
+        return _parse_score(out)
     except Exception as exc:
-        log.warning(f"Classification error: {exc}")
-        return True
+        log.warning(f"llama-cli (temp={temp}) error: {exc}")
+        return None
 
-    # Extract 0 or 1 from output
-    match = re.search(r"[01]", out)
-    if match:
-        val = int(match.group())
-        log.info(f"Classification: {query[:40]!r} → {'medical' if val else 'non-medical'}")
-        return bool(val)
 
-    log.warning(f"Could not parse classifier output: {out[:80]!r}")
-    return True
+def _compute_metrics(scores: list[float]) -> dict:
+    """From a list of scores, compute probabilitic confidence metrics.
+
+    Treats each score's ≥0.5 as a binary vote → empirical P(medical).
+    Returns dict with:
+      - p_med:      P(medical) — fraction of samples above 0.5
+      - confidence: max(p_med, 1 - p_med) — how decisive the vote is
+      - kl_div:     KL(P_empirical || Uniform) in bits
+      - mean_score: average raw score across samples
+      - std_score:  std of raw scores (high = uncertain)
+    """
+    n = len(scores)
+    votes_med = sum(1 for s in scores if s >= 0.5)
+    p_med = votes_med / n
+
+    confidence = max(p_med, 1.0 - p_med)
+    mean_score = float(np.mean(scores))
+    std_score = float(np.std(scores, ddof=1)) if n > 1 else 0.0
+
+    # KL(P || uniform): high KL → model is far from guessing
+    # P = [p_med, 1-p_med], Q = [0.5, 0.5]
+    eps = 1e-12
+    p_clamped = np.clip(p_med, eps, 1.0 - eps)
+    kl = p_clamped * np.log2(p_clamped / 0.5) + \
+         (1.0 - p_clamped) * np.log2((1.0 - p_clamped) / 0.5)
+
+    return {
+        "p_med": round(p_med, 4),
+        "confidence": round(confidence, 4),
+        "kl_div": round(float(kl), 4),
+        "mean_score": round(mean_score, 4),
+        "std_score": round(std_score, 4),
+        "n_samples": n,
+    }
+
+
+# ── Online K-Means (streaming, 3 clusters) ──────────────────────────
+# Features per query:  [confidence, kl_div, keyword_ratio, query_len_norm]
+# Clusters correspond to: "confident-medical", "confident-non-medical", "uncertain"
+
+K_HISTORY = deque(maxlen=200)      # raw feature vectors for refit
+K_CENTERS: np.ndarray | None = None  # (3, n_features)
+K_COUNTS: np.ndarray | None = None   # (3,)  samples per cluster
+K_N_FEATURES = 3
+
+
+def _make_features(confidence: float, kl: float, kw_ratio: float,
+                   query_len: int) -> np.ndarray:
+    """Build a normalised 3-d feature vector for k-means."""
+    return np.array([
+        confidence,                      # already 0-1
+        min(kl, 2.0) / 2.0,             # KL range ~0-inf, cap at 2.0
+        min(kw_ratio, 1.0),             # 0-1
+    ])
+
+
+def _kmeans_init_batch(features: np.ndarray, k: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """Simple k-means++ init on a batch of features."""
+    n = features.shape[0]
+    rng = np.random.default_rng(42)
+    centers = [features[rng.integers(n)]]
+    for _ in range(1, k):
+        dists = np.min(
+            np.array([np.linalg.norm(features - c, axis=1) for c in centers]),
+            axis=0,
+        )
+        dist_sum = dists.sum()
+        if dist_sum < 1e-12:
+            # All points identical → add uniform jitter
+            jitter = rng.uniform(-0.01, 0.01, size=features[0].shape)
+            centers.append(features[0] + jitter)
+        else:
+            probs = dists / dist_sum
+            centers.append(features[rng.choice(n, p=probs)])
+    return np.array(centers), np.ones(k)
+
+
+def _kmeans_assign(centers: np.ndarray, x: np.ndarray) -> int:
+    """Return index of nearest cluster center."""
+    dists = np.linalg.norm(centers - x, axis=1)
+    return int(np.argmin(dists))
+
+
+def _kmeans_update(centers: np.ndarray, counts: np.ndarray,
+                   x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Online k-means: move nearest center toward x."""
+    idx = _kmeans_assign(centers, x)
+    counts[idx] += 1.0
+    lr = 1.0 / counts[idx]
+    centers[idx] = (1.0 - lr) * centers[idx] + lr * x
+    return centers, counts
+
+
+def update_kmeans(confidence: float, kl: float, kw_ratio: float,
+                  query_len: int) -> dict:
+    """Update the online k-means model and return cluster info.
+
+    Returns:
+      {"cluster": int, "label": str, "dist_to_center": float}
+      label = 0 → "confident-medical", 1 → "confident-non-medical", 2 → "uncertain"
+      Negative labels mean "not enough data yet".
+    """
+    global K_CENTERS, K_COUNTS
+
+    x = _make_features(confidence, kl, kw_ratio, query_len)
+    K_HISTORY.append(x)
+
+    if K_CENTERS is None:
+        if len(K_HISTORY) < 9:
+            return {"cluster": -1, "label": "cold-start",
+                    "dist_to_center": 0.0}
+        # Batch init with k-means++
+        arr = np.array(K_HISTORY)
+        K_CENTERS, K_COUNTS = _kmeans_init_batch(arr, k=3)
+
+    K_CENTERS, K_COUNTS = _kmeans_update(K_CENTERS, K_COUNTS, x)
+    idx = _kmeans_assign(K_CENTERS, x)
+    dist = float(np.linalg.norm(K_CENTERS[idx] - x))
+
+    # Label clusters by their mean confidence value
+    labels = {0: "confident-medical", 1: "confident-non-medical", 2: "uncertain"}
+    cluster_order = np.argsort(K_CENTERS[:, 0])  # sort by confidence ascending
+    label_map = {
+        cluster_order[0]: "confident-non-medical",
+        cluster_order[1]: "uncertain",
+        cluster_order[2]: "confident-medical",
+    }
+
+    return {
+        "cluster": int(idx),
+        "label": label_map.get(idx, f"cluster-{idx}"),
+        "dist_to_center": round(dist, 4),
+    }
+
+
+# ── Main classifier ─────────────────────────────────────────────────
+
+def classify_with_confidence(query: str) -> dict:
+    """Classify query and return a result dict with all metrics.
+
+    Returns:
+      {
+        "is_medical": bool,
+        "confidence": float (0-1),
+        "p_med": float,      # empirical P(medical)
+        "kl_div": float,     # KL divergence from uniform
+        "method": str,
+        "kmeans": {...} or None,
+        "mean_score": float,
+        "std_score": float,
+        "n_samples": int,
+        "scores": [float],
+      }
+    """
+    t0 = time.time()
+
+    # Stage 1: keyword pre-filter (instant → high confidence)
+    words = set(query.lower().split())
+    clean_words = {w.strip(".,!?;:'\"()[]") for w in words}
+    kw_count = sum(1 for w in clean_words if w in MEDICAL_KEYWORDS)
+    kw_ratio = kw_count / max(len(clean_words), 1)
+
+    if kw_count > 0:
+        elapsed = (time.time() - t0) * 1000
+        log.info(f"Keyword match ({kw_count}): {query[:40]!r} → medical "
+                 f"(c=0.95, {elapsed:.1f}ms)")
+
+        metrics = {
+            "p_med": 1.0, "confidence": 0.95, "kl_div": 1.0,
+            "mean_score": 0.95, "std_score": 0.0, "n_samples": 1, "scores": [0.95],
+        }
+        kmeans = update_kmeans(0.95, 1.0, kw_ratio, len(clean_words))
+        return {
+            "is_medical": True,
+            "confidence": 0.95,
+            "method": "keyword",
+            "kmeans": kmeans,
+            **metrics,
+        }
+
+    # Stage 2: multi-sample LLM scoring (logprob approximation)
+    scores: list[float] = []
+    for temp in TEMP_SCHEDULE:
+        s = _run_llama_score(query, temp, timeout_s=30)
+        if s is not None:
+            scores.append(s)
+        else:
+            log.warning(f"Score sample failed at temp={temp}")
+
+    # If ALL samples failed, fall back to safe default
+    if not scores:
+        log.error(f"All {N_SAMPLES} score samples failed for {query[:40]!r}")
+        return {
+            "is_medical": True, "confidence": 0.5, "method": "all_failed",
+            "p_med": 0.5, "kl_div": 0.0, "mean_score": 0.5, "std_score": 0.0,
+            "n_samples": 0, "scores": [],
+            "kmeans": update_kmeans(0.5, 0.0, kw_ratio, len(clean_words)),
+        }
+
+    metrics = _compute_metrics(scores)
+    p_med = metrics["p_med"]
+    confidence = metrics["confidence"]
+    kl = metrics["kl_div"]
+    is_med = p_med >= 0.5
+
+    # K-means clustering
+    kmeans = update_kmeans(confidence, kl, kw_ratio, len(clean_words))
+
+    elapsed = (time.time() - t0) * 1000
+    log.info(
+        f"Classify: {query[:40]!r} → p_med={p_med:.2f} "
+        f"c={confidence:.2f} kl={kl:.2f} "
+        f"method=llm n={len(scores)} ({elapsed:.0f}ms)"
+    )
+
+    return {
+        "is_medical": is_med,
+        "confidence": round(confidence, 4),
+        "method": "llm",
+        "kmeans": kmeans,
+        **metrics,
+        "scores": [round(s, 4) for s in scores],
+    }
+
+
+# ── Model Queue (serialises all llama-cli operations) ────────────────
+
+_model_queue: queue.Queue = queue.Queue()
+_worker_thread: threading.Thread | None = None
+
+
+def _run_classify(query: str) -> dict:
+    """Blocking classify call (called from worker thread)."""
+    return classify_with_confidence(query)
+
+
+def _run_infer(prompt: str, max_tokens: int = 512) -> str:
+    """Blocking inference call (called from worker thread)."""
+    cmd = [
+        LLAMA_CLI, "-m", MODEL,
+        "-p", prompt,
+        "-n", str(max_tokens),
+        "--no-display-prompt", "--single-turn", "--simple-io",
+        "-c", "4096", "--temp", "0.7",
+    ]
+    log.info(f"Local inference (queued): n={max_tokens}")
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+    )
+    out, _ = proc.communicate()
+    proc.wait()
+    return _extract_response(out)
+
+
+def _model_worker():
+    """Process classify/infer requests from the queue one-by-one."""
+    log.info("Model worker started")
+    while True:
+        item = _model_queue.get()
+        if item is None:
+            log.info("Model worker stopping")
+            _model_queue.task_done()
+            break
+        op = item["op"]
+        try:
+            if op == "classify":
+                result = _run_classify(item["query"])
+            elif op == "infer":
+                result = _run_infer(item["prompt"], item.get("max_tokens", 512))
+            else:
+                result = {"error": f"unknown op: {op}"}
+            item["result_holder"]["result"] = result
+        except Exception as exc:
+            log.error(f"Model worker {op} failed: {exc}")
+            item["result_holder"]["result"] = {"error": str(exc)}
+        finally:
+            item["event"].set()
+            _model_queue.task_done()
+
+
+def _ensure_worker():
+    global _worker_thread
+    if _worker_thread is None or not _worker_thread.is_alive():
+        _worker_thread = threading.Thread(target=_model_worker, daemon=True)
+        _worker_thread.start()
+        log.info("Model worker launched")
+
+
+def enqueue_classify(query: str, timeout_s: float = 60,
+                     timing: dict | None = None) -> dict:
+    """Enqueue a classify request and wait for the result dict."""
+    _ensure_worker()
+    t0 = time.time()
+    result_holder: dict = {}
+    event = threading.Event()
+    _model_queue.put({
+        "op": "classify", "query": query,
+        "result_holder": result_holder, "event": event,
+    })
+    if not event.wait(timeout=timeout_s):
+        log.error(f"Classify timed out after {timeout_s}s")
+        fallback = {
+            "is_medical": True, "confidence": 0.5, "method": "timeout",
+            "p_med": 0.5, "kl_div": 0.0, "mean_score": 0.5,
+            "std_score": 0.0, "n_samples": 0, "scores": [],
+            "kmeans": None,
+        }
+        if timing is not None:
+            timing["classify_ms"] = (time.time() - t0) * 1000
+            timing["classify_method"] = "timeout"
+            timing["confidence"] = 0.5
+        return fallback
+    r = result_holder.get("result", {})
+    if isinstance(r, dict) and "error" in r:
+        fallback = {
+            "is_medical": True, "confidence": 0.5, "method": "queue_error",
+            "p_med": 0.5, "kl_div": 0.0, "mean_score": 0.5,
+            "std_score": 0.0, "n_samples": 0, "scores": [],
+            "kmeans": None,
+        }
+        if timing is not None:
+            timing["classify_ms"] = (time.time() - t0) * 1000
+            timing["classify_method"] = "queue_error"
+            timing["confidence"] = 0.5
+        return fallback
+    if timing is not None:
+        timing["classify_ms"] = (time.time() - t0) * 1000
+        timing["classify_method"] = r.get("method", "queue")
+        timing["confidence"] = r.get("confidence", 0.5)
+        timing["p_med"] = r.get("p_med", 0.5)
+        timing["kl_div"] = r.get("kl_div", 0.0)
+        timing["kmeans_label"] = (r.get("kmeans") or {}).get("label", "cold-start")
+    return r
+
+
+def enqueue_infer(prompt: str, max_tokens: int = 512,
+                  timeout_s: float = 600) -> str:
+    _ensure_worker()
+    result_holder: dict = {}
+    event = threading.Event()
+    _model_queue.put({
+        "op": "infer", "prompt": prompt, "max_tokens": max_tokens,
+        "result_holder": result_holder, "event": event,
+    })
+    if not event.wait(timeout=timeout_s):
+        log.error(f"Inference timed out after {timeout_s}s")
+        return "[NX timeout]"
+    r = result_holder.get("result", "[NX error]")
+    if isinstance(r, dict) and "error" in r:
+        return f"[NX error: {r['error']}]"
+    return r if isinstance(r, str) else "[NX error]"
 
 
 # ── AGX Communication (REST-based) ─────────────────────────────────
 
+def agx_base_url() -> str:
+    return f"http://{agx_host}:{agx_port}"
+
+
 def fetch_from_agx(query: str) -> str:
-    """Send query to AGX via REST, poll for the response.
-
-    Uses POST /send to submit, then polls GET /messages until the
-    server response appears.
-    """
     base = agx_base_url()
-    log.info(f"Forwarding query to AGX via REST: {base}/send")
-
+    log.info(f"Forwarding to AGX: {base}/send")
     try:
         r = requests.post(
             f"{base}/send",
             json={"sender": node_name, "text": query},
-            timeout=15,
+            timeout=120,
         )
         r.raise_for_status()
+        body = r.json()
+        # AGX may return the reply inline — use it directly
+        if "reply" in body:
+            reply = body["reply"]
+            text = reply.get("text", "")
+            if text:
+                log.info(f"AGX reply inline ({len(text)} chars)")
+                return text
     except requests.RequestException as exc:
         log.error(f"AGX REST send failed: {exc}")
-        return f"[AGX unreachable]"
+        return "[AGX unreachable]"
 
-    # Poll for response — look for the first server message after now
     deadline = time.time() + 120
     poll_interval = 1.0
     last_seen = time.time()
@@ -139,27 +527,21 @@ def fetch_from_agx(query: str) -> str:
             log.warning(f"AGX poll failed: {exc}")
             time.sleep(poll_interval)
             continue
-
         for msg in reversed(msgs):
-            ts = msg.get("timestamp", "")
             role = msg.get("role", "")
             sender = msg.get("sender", "")
             text = msg.get("text", "")
             if role == "server" and sender != "system":
-                # Found a server response — does it relate to our query?
-                msg_time = _parse_timestamp(ts)
+                msg_time = _parse_timestamp(msg.get("timestamp", ""))
                 if msg_time and msg_time > last_seen:
-                    log.info(f"AGX response received ({len(text)} chars)")
+                    log.info(f"AGX response ({len(text)} chars)")
                     return text
-
         time.sleep(poll_interval)
-
     log.error("AGX response timed out")
     return "[AGX timeout]"
 
 
 def _parse_timestamp(ts: str) -> float:
-    """Parse ISO timestamp to unix float, return 0 on failure."""
     try:
         from datetime import datetime, timezone
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -179,13 +561,10 @@ def log_to_agx(entry: dict):
         pass
 
 
-# ── Local inference ─────────────────────────────────────────────────
+# ── Local inference helpers ─────────────────────────────────────────
 
-def build_prompt(
-    user_msg: str,
-    system: str = "",
-    messages: list[dict] | None = None,
-) -> str:
+def build_prompt(user_msg: str, system: str = "",
+                 messages: list[dict] | None = None) -> str:
     parts = []
     if system:
         parts.append(f"<|im_start|>system\n{system}<|im_end|>")
@@ -225,31 +604,6 @@ def _extract_response(raw: str) -> str:
     return "\n".join(gen_lines).strip()
 
 
-def stream_tokens(prompt: str, max_tokens: int = 512):
-    cmd = [
-        LLAMA_CLI,
-        "-m", MODEL,
-        "-p", prompt,
-        "-n", str(max_tokens),
-        "--no-display-prompt",
-        "--single-turn",
-        "--simple-io",
-        "-c", "4096",
-    ]
-    log.info(f"Local inference: {' '.join(cmd[-6:])}")
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    out, _ = proc.communicate()
-    proc.wait()
-    response = _extract_response(out)
-    for ch in response:
-        yield ch
-
-
 # ── Routes ──────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -262,19 +616,51 @@ def health():
     return jsonify({"status": "ok", "model": str(MODEL)})
 
 
+@app.route("/classify", methods=["POST"])
+def classify():
+    text = request.json.get("text", "")
+    t0 = time.time()
+    timing: dict = {}
+    result = enqueue_classify(text, timing=timing)
+    total_ms = (time.time() - t0) * 1000
+    is_med = result["is_medical"]
+    conf = result["confidence"]
+    route_nx = is_med and conf >= CONFIDENCE_THRESHOLD
+    return jsonify({
+        "is_medical": is_med,
+        "confidence": conf,
+        "p_med": result.get("p_med", 0.5),
+        "kl_div": result.get("kl_div", 0.0),
+        "method": result.get("method", "unknown"),
+        "n_samples": result.get("n_samples", 0),
+        "kmeans": result.get("kmeans"),
+        "route": "NX" if route_nx else "AGX",
+        "confidence_threshold": CONFIDENCE_THRESHOLD,
+        "classify_ms": timing.get("classify_ms", 0),
+        "total_ms": round(total_ms, 1),
+    })
+
+
 @app.route("/chat", methods=["POST"])
 def chat():
+    t_start = time.time()
     data = request.get_json(force=True)
     user_msg = data.get("message", data.get("content", ""))
     system = data.get("system", "")
     stream = data.get("stream", True)
     messages = data.get("messages")
 
-    medical = is_medical_query(user_msg)
-    route_agx = not medical
+    timing: dict = {}
+    result = enqueue_classify(user_msg, timing=timing)
+    is_med = result["is_medical"]
+    conf = result["confidence"]
+    route_agx = not (is_med and conf >= CONFIDENCE_THRESHOLD)
 
     log.info(
-        f"Query: {user_msg[:60]!r}  medical={medical}  "
+        f"Query: {user_msg[:60]!r}  "
+        f"is_med={is_med}  c={conf:.3f}  "
+        f"kl={result.get('kl_div', 0):.2f}  "
+        f"kmeans={result.get('kmeans', {}).get('label', '?')}  "
         f"route={'AGX' if route_agx else 'NX'}"
     )
 
@@ -282,24 +668,62 @@ def chat():
         full = fetch_from_agx(user_msg)
     else:
         prompt = build_prompt(user_msg, system, messages)
-        full = "".join(stream_tokens(prompt))
+        full = enqueue_infer(prompt)
+
+    t_end = time.time()
+    timing["inference_ms"] = (
+        t_end - t_start - timing.get("classify_ms", 0) / 1000
+    ) * 1000
+    timing["total_ms"] = (t_end - t_start) * 1000
+    timing["route"] = "AGX" if route_agx else "NX"
+    timing["response_len"] = len(full)
+
+    log.info(
+        f"Timing: classify={timing.get('classify_ms', 0):.0f}ms "
+        f"({result.get('method', '?')})  "
+        f"c={conf:.3f}  "
+        f"infer={timing['inference_ms']:.0f}ms  "
+        f"total={timing['total_ms']:.0f}ms  "
+        f"route={timing['route']}  "
+        f"resp={timing['response_len']}chars"
+    )
 
     log_to_agx({
         "query": user_msg,
         "response": full,
-        "medical": medical,
+        "is_medical": is_med,
+        "confidence": conf,
+        "p_med": result.get("p_med"),
+        "kl_div": result.get("kl_div"),
+        "kmeans": result.get("kmeans"),
+        "confidence_threshold": CONFIDENCE_THRESHOLD,
         "routed_to": "AGX" if route_agx else "NX",
+        "timing_ms": timing,
     })
 
     source = "AGX" if route_agx else "NX"
 
     if not stream:
-        return jsonify({"content": full.strip(), "source": source})
+        return jsonify({
+            "content": full.strip(),
+            "source": source,
+            "timing_ms": timing,
+            "confidence": conf,
+            "p_med": result.get("p_med"),
+            "kl_div": result.get("kl_div"),
+            "kmeans_label": (result.get("kmeans") or {}).get("label"),
+        })
 
     def generate():
         for i in range(0, len(full), 80):
             yield f"data: {json.dumps({'token': full[i:i+80], 'source': source})}\n\n"
-        yield f"data: {json.dumps({'done': True, 'source': source, 'content': full.strip()})}\n\n"
+        done = {
+            "done": True, "source": source, "content": full.strip(),
+            "timing_ms": timing, "confidence": conf,
+            "p_med": result.get("p_med"), "kl_div": result.get("kl_div"),
+            "kmeans_label": (result.get("kmeans") or {}).get("label"),
+        }
+        yield f"data: {json.dumps(done)}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
 
@@ -307,7 +731,6 @@ def chat():
 @sock.route("/ws")
 def ws_chat(ws):
     log.info("WebSocket connected")
-
     while True:
         raw = ws.receive()
         if raw is None:
@@ -317,7 +740,6 @@ def ws_chat(ws):
         except json.JSONDecodeError:
             ws.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
             continue
-
         msg_type = data.get("type", "")
         if msg_type == "ping":
             ws.send(json.dumps({"type": "pong"}))
@@ -329,11 +751,18 @@ def ws_chat(ws):
         system = data.get("system", "")
         messages = data.get("messages")
 
-        medical = is_medical_query(user_msg)
-        route_agx = not medical
+        ws_start = time.time()
+        timing: dict = {}
+        result = enqueue_classify(user_msg, timing=timing)
+        is_med = result["is_medical"]
+        conf = result["confidence"]
+        route_agx = not (is_med and conf >= CONFIDENCE_THRESHOLD)
 
         log.info(
-            f"Query: {user_msg[:60]!r}  medical={medical}  "
+            f"Query: {user_msg[:60]!r}  "
+            f"is_med={is_med}  c={conf:.3f}  "
+            f"kl={result.get('kl_div', 0):.2f}  "
+            f"kmeans={result.get('kmeans', {}).get('label', '?')}  "
             f"route={'AGX' if route_agx else 'NX'}"
         )
 
@@ -341,13 +770,37 @@ def ws_chat(ws):
             full = fetch_from_agx(user_msg)
         else:
             prompt = build_prompt(user_msg, system, messages)
-            full = "".join(stream_tokens(prompt))
+            full = enqueue_infer(prompt)
+
+        ws_end = time.time()
+        timing["inference_ms"] = (
+            ws_end - ws_start - timing.get("classify_ms", 0) / 1000
+        ) * 1000
+        timing["total_ms"] = (ws_end - ws_start) * 1000
+        timing["route"] = "AGX" if route_agx else "NX"
+        timing["response_len"] = len(full)
+
+        log.info(
+            f"Timing: classify={timing.get('classify_ms', 0):.0f}ms "
+            f"({result.get('method', '?')})  "
+            f"c={conf:.3f}  "
+            f"infer={timing['inference_ms']:.0f}ms  "
+            f"total={timing['total_ms']:.0f}ms  "
+            f"route={timing['route']}  "
+            f"resp={timing['response_len']}chars"
+        )
 
         log_to_agx({
             "query": user_msg,
             "response": full,
-            "medical": medical,
+            "is_medical": is_med,
+            "confidence": conf,
+            "p_med": result.get("p_med"),
+            "kl_div": result.get("kl_div"),
+            "kmeans": result.get("kmeans"),
+            "confidence_threshold": CONFIDENCE_THRESHOLD,
             "routed_to": "AGX" if route_agx else "NX",
+            "timing_ms": timing,
         })
 
         source = "AGX" if route_agx else "NX"
@@ -355,7 +808,14 @@ def ws_chat(ws):
         for i in range(0, len(full), 80):
             ws.send(json.dumps({"type": "chunk", "content": full[i:i+80], "source": source}))
         ws.send(json.dumps({
-            "type": "done", "content": full.strip(), "source": source
+            "type": "done",
+            "content": full.strip(),
+            "source": source,
+            "timing_ms": timing,
+            "confidence": conf,
+            "p_med": result.get("p_med"),
+            "kl_div": result.get("kl_div"),
+            "kmeans_label": (result.get("kmeans") or {}).get("label"),
         }))
 
 
@@ -366,22 +826,29 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Hybrid NX/AGX subserver")
     parser.add_argument("--agx-ip", required=True, help="AGX Tailscale IP")
-    parser.add_argument("--agx-port", type=int, default=8000, help="AGX server port")
-    parser.add_argument("--port", type=int, default=8765, help="This server's port")
+    parser.add_argument("--agx-port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--node-name", default="nx-subserver",
-                        help="Client ID for AGX connection")
+    parser.add_argument("--node-name", default="nx-subserver")
+    parser.add_argument("--confidence", type=float, default=0.7,
+                        help="Min confidence to route to NX (0-1, default=0.7)")
     args = parser.parse_args()
 
     agx_host = args.agx_ip
     agx_port = args.agx_port
     node_name = args.node_name
+    CONFIDENCE_THRESHOLD = args.confidence
 
-    print(f"\n  Subserver: http://{args.host}:{args.port}")
-    print(f"  AGX:       http://{agx_host}:{agx_port}")
-    print(f"  Node:      {node_name}")
-    print(f"  WS:        ws://{args.host}:{args.port}/ws")
-    print(f"  Chat API:  http://{args.host}:{args.port}/chat (POST)")
-    print(f"  Routing:   medical/greeting → NX local,  other → AGX\n")
+    _ensure_worker()
+
+    print(f"\n  Subserver:  http://{args.host}:{args.port}")
+    print(f"  AGX:        http://{agx_host}:{agx_port}")
+    print(f"  Node:       {node_name}")
+    print(f"  WS:         ws://{args.host}:{args.port}/ws")
+    print(f"  Chat API:   http://{args.host}:{args.port}/chat (POST)")
+    print(f"  Confidence: >= {CONFIDENCE_THRESHOLD} → NX,  < {CONFIDENCE_THRESHOLD} → AGX")
+    print(f"  Model q:    {{classify, infer}} (serialised)")
+    print(f"  Classifier: multi-sample ({N_SAMPLES}x) + KL divergence + online k-means")
+    print()
 
     app.run(host=args.host, port=args.port, threaded=True)

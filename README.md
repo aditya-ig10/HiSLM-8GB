@@ -1,317 +1,339 @@
 # HiSLM-8G
 
-Hierarchical Small Language Model inference system for edge devices. Fine-tune and serve 1-3B parameter LLMs on **Jetson Orin NX 8GB**, with a companion **AGX Orin server** and a desktop **A5000 training pipeline**.
+Hierarchical Small Language Model inference system for edge devices — Medical QA domain.
+Fine-tune and serve 1-3B parameter LLMs on **Jetson Orin NX 8GB**, with a companion
+**AGX Orin server** (Qwen2.5-3B) and a desktop **A5000 training pipeline**.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   AGX Orin (Server)                  │
-│  ┌────────────┐  ┌──────────────┐  ┌─────────────┐  │
-│  │ Qwen 2.5-3B │  │  Flask/WS    │  │  ngrok      │  │
-│  │ GGUF Model  │  │  Server      │  │  Tunnel     │  │
-│  └────────────┘  └──────────────┘  └─────────────┘  │
-└──────────────────────┬──────────────────────────────┘
-                       │ LAN / Tailscale
-    ┌──────────────────┴──────────────────┐
-    │          Orin NX (Server)           │
-    │  ┌──────────────────────────────┐   │
-    │  │  subserver.py                │   │
-    │  │  ┌──────────┐  ┌─────────┐  │   │
-    │  │  │Classifier│→ │ Router  │  │   │
-    │  │  └──────────┘  └────┬────┘  │   │
-    │  │               │     │       │   │
-    │  │          ┌────┘     └──┐    │   │
-    │  │          ▼             ▼    │   │
-    │  │   ┌────────────┐ ┌────────┐│   │
-    │  │   │ Qwen 1.5B  │ │ AGX    ││   │
-    │  │   │ (local)    │ │ (relay)││   │
-    │  │   └────────────┘ └────────┘│   │
-    │  └──────────────────────────────┘   │
-    │                                     │
-    │  client.py / client2.py             │
-    │  (thin clients, connect to AGX)     │
-    └─────────────────────────────────────┘
+                     ┌─────────────────────────────────────┐
+                     │         AGX Orin (Server)            │
+                     │  ┌────────────┐  ┌───────────────┐  │
+                     │  │ Qwen 2.5-3B │  │  server2.py   │  │
+                     │  │ llama.cpp   │  │  Flask + REST  │  │
+                     │  └────────────┘  └───────┬───────┘  │
+                     └──────────────────────────┼──────────┘
+                                                │ LAN / Tailscale
+     ┌──────────────────────────────────────────┴──────────────┐
+     │               Orin NX (Edge Router)                      │
+     │  ┌────────────────── subserver.py ────────────────────┐  │
+     │  │  ┌──────────────┐  ┌──────────┐  ┌─────────────┐  │  │
+     │  │  │  Model Queue  │  │Classifier│→│   Router    │  │  │
+     │  │  │  (thread-safe)│  │(3-stage) │  │(threshold)  │  │  │
+     │  │  └──────────────┘  └──────────┘  └──────┬──────┘  │  │
+     │  │                                     │            │  │
+     │  │                               ┌─────┘     ┌─────┘  │  │
+     │  │                               ▼           ▼        │  │
+     │  │                        ┌────────────┐ ┌─────────┐  │  │
+     │  │                        │ Qwen 1.5B  │ │ AGX     │  │  │
+     │  │                        │ (local NX) │ │ (relay) │  │  │
+     │  │                        └────────────┘ └─────────┘  │  │
+     │  └────────────────────────────────────────────────────┘  │
+     │                                                          │
+     │  Clients: client.py / client2.py / Web UIs               │
+     └──────────────────────────────────────────────────────────┘
 ```
 
-## Components
+### Hardware Tiers
 
-### Inference Server (`server_qwen.py`)
+| Tier | Device | Memory | Role |
+|------|--------|--------|------|
+| **Edge** | Jetson Orin NX 8GB | 8 GB unified | Hybrid router + local inference (Qwen2.5-1.5B) + QLoRA training |
+| **Server** | Jetson AGX Orin 32GB+ | 32 GB+ | Inference server (Qwen2.5-3B, GPU accelerated) |
+| **Desktop** | RTX A5000 | 24 GB | Full training pipeline (bf16, full 219k dataset) |
 
-Flask + WebSocket server that spawns `llama-cli` as a subprocess. Serves the **Qwen2.5-1.5B-Instruct** model (GGUF, Q4_K_M).
+---
 
-> **Note:** The medical LoRA adapter was removed because it degraded English medical QA. The base Qwen2.5-1.5B-Instruct outperforms it for conversational English medical queries. See `BUG_ANALYSIS.md` for details.
+## Quick Start
 
-#### Quick start
+### 1. Start NX Subserver (classify + route)
 
 ```bash
-# Activate environment
 source venv/bin/activate
-
-# Start server (default port 8765)
-python server_qwen.py
-
-# Custom port
-python server_qwen.py --port 8080
-
-# Expose via ngrok
-python server_qwen.py --ngrok
+python subserver.py --agx-ip 172.16.6.21     # LAN AGX
+python subserver.py --agx-ip 100.120.59.117  # Tailscale AGX
 ```
 
-#### API
+Optional flags:
+```
+--confidence 0.7    Min confidence to route to NX (default 0.7)
+--port 8765         This server's port (default 8765)
+--workers 1         Worker threads (keep at 1 for NX)
+```
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check |
-| GET | `/` | Web chat UI (`orin_index.html`) |
-| POST | `/chat` | Chat completion (JSON, SSE streaming) |
-| WS | `/ws` | WebSocket chat |
+### 2. Start Standalone NX Server (no AGX needed)
 
-**POST /chat** accepts:
+```bash
+python server_qwen.py                         # port 8765
+python server_qwen.py --port 8080 --ngrok     # custom port + ngrok
+```
+
+### 3. Clients
+
+```bash
+# LAN GUI
+python client.py --agx-ip 172.16.6.21
+# Tailscale CLI
+python client2.py --agx-ip 100.120.59.117 --cli --node-name nx-node
+```
+
+---
+
+## Subserver (`subserver.py`) — How Routing Works
+
+All model operations go through a **thread-safe serialised queue** (`queue.Queue` +
+single daemon worker). This prevents concurrent `llama-cli` processes from
+OOM'ing the 8GB NX.
+
+### 3-Stage Classifier
+
+**Stage 1 — Keyword pre-filter** (<0.01ms):
+Checks query against 70+ medical/greeting keywords. Match → immediate
+`is_medical=True, confidence=0.95`. Bypasses LLM entirely.
+
+**Stage 2 — Multi-sample LLM scoring** (~11s):
+Runs the classifier prompt at temps 0.0 (deterministic) and 0.5 (stochastic).
+Each produces a score `0.0–1.0`. Treats each ≥0.5 as a medical vote →
+empirical `P(medical)`. Confidence = `max(P(med), 1-P(med))`.
+
+**Stage 3 — KL divergence + online k-means**:
+- **KL divergence**: `KL(P_empirical || Uniform)` in bits — measures how far
+  the model's opinion is from a coin-flip. High (≈1) = confident, low (≈0) = uncertain.
+- **Online k-means**: 3-d feature vector `[confidence, kl_div, kw_ratio]`
+  clustered into `confident-medical / uncertain / confident-non-medical`.
+  Centroids update incrementally. Cold-start from first 9 samples.
+
+### Routing Decision
+
+```
+Route to NX  ⇔  is_medical == True  AND  confidence >= 0.7
+Route to AGX ⇔  otherwise
+```
+
+Uncertain or borderline queries always defer to the stronger AGX model.
+
+### Response Format
+
+Every response includes confidence metrics:
 ```json
 {
-  "message": "What is hypertension?",
-  "system": "Optional system prompt",
-  "stream": false
+  "content": "Paris is the capital of France.",
+  "source": "AGX",
+  "confidence": 0.95,
+  "p_med": 0.0,
+  "kl_div": 1.0,
+  "kmeans_label": "confident-non-medical"
 }
 ```
 
-- `stream: true` (default) — returns SSE stream of character tokens
-- `stream: false` — returns JSON `{"content": "..."}`
+---
 
-#### How it works
+## API Reference
 
-**1. Prompt construction** (`build_prompt` in `server_qwen.py:38`):
+### POST /chat (JSON + SSE streaming)
 
-Wraps the user message in Qwen2.5 chat template tokens:
-```
-<|im_start|>user
-What is hypertension?<|im_end|>
-<|im_start|>assistant
-```
+```json
+// Request
+{"message": "What is hypertension?", "stream": false}
 
-**2. Subprocess invocation** (`stream_tokens` in `server_qwen.py:60`):
+// Response (stream=false)
+{"content": "...", "source": "NX", "confidence": 0.95, ...}
 
-Spawns llama-cli (CPU-only, aarch64 build b9453):
-
-```
-llama-cli \
-  -m models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
-  -p "<|im_start|>user\n...<|im_end|>\n<|im_start|>assistant" \
-  -n 512 \
-  --no-display-prompt \
-  --single-turn \
-  --simple-io \
-  -c 4096
+// SSE (stream=true)
+data: {"token": "...", "source": "NX"}
+data: {"done": true, "content": "...", "source": "NX", "confidence": 0.95, ...}
 ```
 
-Key flags:
-- `--single-turn` — prevents llama-cli from entering interactive mode (without this it prints `> ` prompts in an infinite loop)
-- `--no-display-prompt` — prevents the prompt from being echoed in the output
+### POST /classify (confidence-only, no inference)
 
-**3. Response extraction** (`_extract_response` in `server_qwen.py:47`):
+```json
+// Request
+{"text": "What are symptoms of diabetes?"}
 
-The raw stdout from llama-cli contains the loading banner, ASCII logo, build info, command menu, and performance stats. `_extract_response` strips all of that by:
-- Finding the last occurrence of `<|im_start|>assistant\n\n` — everything before it is discarded
-- Truncating at `\n[ Prompt:` — the stats footer is discarded
-
-**4. Streaming** — characters are yielded one at a time for SSE or WebSocket delivery.
-
-#### Performance
-
-On Jetson Orin NX 8GB (CPU-only llama-cli, Q4_K_M):
-
-- Prompt processing: ~50 t/s
-- Text generation: ~11-17 t/s (varies with context length)
-
-Total time per request (512 tokens): ~30-50 seconds depending on response length.
-
-#### Response extraction details
-
-The raw llama-cli output looks like:
-
-```
-\nLoading model... \n\n[ASCII logo]\n\nbuild: ...\nmodel: ...\n
-available commands:\n  ...\n\n
-> <|im_start|>user\nWhat is hypertension?<|im_end|\n
-<|im_start|>assistant\n\n
-[GENERATED RESPONSE TEXT]
-\n[ Prompt: 50 t/s | Generation: 11 t/s ]\n\nExiting...\n
+// Response
+{
+  "is_medical": true,
+  "confidence": 0.95,
+  "p_med": 1.0,
+  "kl_div": 1.0,
+  "method": "keyword",
+  "kmeans": {"cluster": 2, "label": "confident-medical", "dist_to_center": 0.12},
+  "route": "NX",
+  "classify_ms": 0.8
+}
 ```
 
-`_extract_response` removes everything before and including `<|im_start|>assistant\n\n`, then removes `[ Prompt:` and everything after, returning only the generated text.
-
-### Hybrid Subserver (`subserver.py`)
-
-Runs on **Orin NX**. Classifies each user query and routes it to the appropriate backend:
-- **Medical queries & simple greetings** → answered locally by Qwen2.5-1.5B
-- **Non-medical / out-of-domain queries** → forwarded to AGX Orin for the more powerful Qwen2.5-3B
-
-Every response includes a `"source"` field (`"NX"` or `"AGX"`) so the UI can label where the answer came from.
-
-#### Classification
-
-Uses the local Qwen2.5-1.5B with a minimal prompt:
+### GET /health
+```json
+{"status": "ok", "model": "/path/to/model.gguf"}
 ```
-Is this a medical/health topic or a simple greeting?
-Answer with exactly one number: 1 for yes, 0 for no.
+
+### WebSocket /ws
+
+```json
+// Client → Server
+{"type": "ping"}
+{"type": "message", "sender": "nx-node", "content": "hello"}
+
+// Server → Client
+{"type": "pong"}
+{"type": "chunk", "content": "...", "source": "NX"}
+{"type": "done", "content": "...", "source": "NX", "confidence": 0.95, ...}
 ```
-The model outputs a single digit (`0` or `1`), extracted via regex. If classification fails, it defaults to True (local) as a safe fallback.
 
-#### AGX relay
+---
 
-Uses REST polling instead of WebSocket for reliability:
-1. `POST /send` — submits the query to AGX
-2. `GET /messages?limit=20` — polls every 1s until a server response appears
-3. Response forwarded back to the client with `source: "AGX"`
+## Tests & Eval
 
-#### Quick start
+| Script | Purpose |
+|--------|---------|
+| `eval_classifier.py` | Run 130 eval queries against /classify, report accuracy + latency |
+| `eval_baseline.py` | Compare Always-NX / Always-AGX / HiSLM on same eval set |
+| `analysis_routing_overhead.py` | Break-even analysis for routing vs always-AGX |
+| `measure_nx_queries.py` | Benchmark NX inference latency |
+| `parse_tegrastats.py` | Parse tegrastats power logs |
+
+### Classifier Results (130 queries, Jetson Orin NX)
+
+| Metric | Value |
+|--------|-------|
+| Accuracy | 72.3% (94/130) |
+| Precision (non-medical) | 100% (60/60) |
+| Recall (medical) | 48.6% (34/70) |
+| Avg classify latency | 3770 ms |
+| Keyword catch rate | 26.2% (bypasses LLM classify) |
+
+### NX Inference Performance (Qwen2.5-1.5B Q4_K_M, CPU-only)
+
+| Scenario | Total Time |
+|----------|-----------|
+| Cold start | 4.5 s |
+| Short QA (50 tok) | 4.6 s |
+| Medical QA (128 tok) | 12.3 s |
+| Long gen (256 tok) | 20.3 s |
+| Medical classification | 3.8-11 s |
+
+### Energy (tegrastats)
+
+| State | Total Power | CPU+GPU |
+|-------|-----------|---------|
+| Idle | 7.38 W | 1.07 W |
+| Inference | 12.28 W | 4.51 W |
+| **Marginal** | **4.89 W** | **3.44 W** |
+
+Energy per medical query: ~70J CPU+GPU marginal.
+
+---
+
+## Training (QLoRA)
+
+Fine-tunes TinyLlama-1.1B-Chat-v1.0 on medical datasets using QLoRA on NX GPU.
 
 ```bash
-python subserver.py --agx-ip 172.16.6.21          # default port 8765
-python subserver.py --agx-ip 172.16.6.21 --port 9000
+python preprocess.py           # Prepare dataset (MedQA + PubMed + MT Samples)
+python train.py                # Train (default: 500 samples, r=8)
+python train.py --lora-r 16 --samples 2000   # Custom config
+bash train.sh                  # Launcher with diagnostics
 ```
 
-#### API
+### Ablation Results (500 samples)
 
-Same surface as `server_qwen.py`, plus `source` in every response:
+| Rank | Start Loss | Final Loss | Time | GPU Mem Free |
+|------|-----------|-----------|------|-------------|
+| r=4 | 3.53 | 1.49 | 5.7 min | 0.85 GB |
+| **r=8** | **2.98** | **1.42** | **5.6 min** | **1.08 GB** |
+| r=16 | 3.44 | 1.52 | 5.6 min | 1.28 GB |
 
-**SSE chunk:** `{"token": "...", "source": "NX"}`
-**SSE done:**   `{"done": true, "source": "AGX", "content": "..."}`
-**WS chunk:**   `{"type": "chunk", "content": "...", "source": "AGX"}`
-**WS done:**    `{"type": "done", "content": "...", "source": "NX"}`
-
-#### Logging
-
-Every query, response, classification, and routing decision is POSTed to AGX at `/log` for centralised monitoring.
-
-
-
-### Training (`train.py`)
-
-Fine-tunes **TinyLlama-1.1B-Chat-v1.0** on medical datasets using QLoRA (4-bit). Runs on Jetson Orin NX 8GB with unified memory.
-
-- **Datasets:** Med_QA, MT Samples, PubMed QA -> 224k instruction pairs
-- **Method:** QLoRA (rank=8, alpha=16), 4-bit nf4, double_quant
-- **Hardware:** Jetson Orin NX 8GB (JetPack 6.2, CUDA 12.6)
-- **Stable training:** 500-2000 samples, ~2.5s/sample, 0.9-1.0GB free memory
-
-```bash
-# Preprocess data
-python preprocess.py
-
-# Train (via launcher)
-bash train.sh
-
-# Or directly
-python train.py
-```
-
-### Clients
-
-| Client | Use Case |
-|--------|----------|
-| `client.py` | Connect to AGX Orin server over LAN |
-| `client_2.py` | Connect to any HiSLM server (generic) |
-| `client2.py` | Connect over Tailscale wireless |
-
-> Running `subserver.py` replaces the need for clients — they connect directly to the NX server, which handles local inference or relays to AGX automatically.
-
-### A5000 Training Package (`a5000_training/`)
-
-Alternative training pipeline for desktop RTX A5000 (24GB) with full 219k dataset, bf16 precision, and higher LoRA rank.
+### A5000 Training (full dataset)
 
 ```bash
 cd a5000_training
 pip install -r requirements.txt
-python train_a5000.py
+python train_a5000.py           # bf16, full 219k, ~4-6h
+python merge_and_convert.py     # PEFT → GGUF
 ```
 
-## Web UIs
+---
 
-- `static/index.html` — Sci-fi terminal chat UI (used by AGX server)
-- `static/nx_index.html` — Wireless NX client UI
-- `orin_index.html` — Standalone chat UI for the Qwen server with:
-  - **Session management** — create, switch, and delete chat sessions from the sidebar
-  - **Multi-turn context** — last 10 messages sent with each request for coherent conversation
-  - **Live streaming** — tokens appear character-by-character as the model generates (both WebSocket and REST modes)
-  - **Dark/light theme** — persisted across sessions
-  - **Three modes** — demo, WebSocket, and REST (SSE streaming)
+## Quantization Benchmark (Qwen2.5-1.5B, NX CPU)
 
-## LoRA Conversion (PEFT -> GGUF)
+| Quant | Size | PP (t/s) | TG (t/s) |
+|-------|------|---------|---------|
+| Q4_K_M | 1.1 GB | 57.1 | **15.3** |
+| Q5_K_M | 1.1 GB | 43.7 | 11.5 |
+| Q8_0 | 1.6 GB | 62.3 | 13.1 |
 
-The medical LoRA was originally trained as a PEFT adapter (`trained/`), then converted to GGUF format for use with llama-cli:
+Q4_K_M provides the best latency/quality tradeoff for edge deployment.
 
-```bash
-python ~/llama/llama.cpp/convert_lora_to_gguf.py \
-  --base models/qwen2.5-1.5b-instruct-f16.gguf \
-  --lora trained/ \
-  --output models/medical-lora-qwen2.5-1.5b.gguf
-```
-
-Conversion reduces the adapter from 71 MB (safetensors) to ~1 MB (GGUF) and makes it loadable with llama-cli's `--lora` flag.
-
-## Troubleshooting notes
-
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| llama-cli prints `> ` forever | Interactive mode without prompt | Add `--single-turn` flag |
-| Response includes ASCII banner/logo | No output filtering | Use `_extract_response` to strip non-content |
-| OOM on model load | FP16 model too large (3.1 GB) | Switch to Q4_K_M quantized (985 MB) |
-| Server returns empty content | Wrong marker in extract | Search for `<|im_start|>assistant\n\n` (not `> <|im_start|>...`) |
+---
 
 ## Project Structure
 
 ```
 HiSLM-8G/
-├── train.py                        # Main training script (QLoRA)
-├── preprocess.py                   # Dataset preprocessing
-├── server_qwen.py                  # Inference server (Flask + WS)
-├── subserver.py                    # Hybrid NX/AGX server (classify + route)
-├── client.py                       # LAN client
-├── client_2.py                     # Generic client
-├── client2.py                      # Tailscale wireless client
-├── test_step.py                    # Training diagnostic script
-├── run_qwen_web.sh                 # Server deployment launcher
-├── train.sh                        # Training launcher
+├── subserver.py              # Hybrid NX/AGX server (queue + confidence routing)
+├── server_qwen.py            # Standalone NX inference server
+├── train.py                  # QLoRA fine-tuning (manual loop, TinyLlama-1.1B)
+├── preprocess.py             # Dataset preprocessing (3 datasets → 224k pairs)
+├── eval_classifier.py        # Classifier evaluation (130 queries)
+├── eval_baseline.py          # Three-mode comparison script
+├── analysis_routing_overhead.py  # Routing break-even analysis
+├── measure_nx_queries.py     # NX inference benchmark harness
+├── parse_tegrastats.py       # Power log parser
+├── eval_routing.jsonl        # 130 labeled eval queries
+├── hislm-nx.service          # Systemd unit for auto-restart
+├── client.py                 # LAN client
+├── client2.py                # Tailscale wireless client
+├── client_2.py               # Generic client
+├── orin_index.html           # Standalone chat UI (1573 lines)
 ├── static/
-│   ├── index.html                  # AGX chat UI
-│   └── nx_index.html               # NX wireless UI
-├── orin_index.html                 # Standalone Qwen chat UI
-├── a5000_training/                 # Desktop GPU training pipeline
+│   ├── index.html            # AGX server chat UI
+│   └── nx_index.html         # NX wireless client UI
+├── a5000_training/           # Desktop GPU training pipeline
 │   ├── train_a5000.py
 │   ├── merge_and_convert.py
 │   └── requirements.txt
-├── dataset/                        # Medical datasets (gitignored)
-├── models/                         # GGUF models (gitignored)
-│   ├── qwen2.5-1.5b-instruct-q4_k_m.gguf   # 985 MB
-│   └── medical-lora-qwen2.5-1.5b.gguf      # ~1 MB
-├── output/                         # Training outputs (gitignored)
-├── trained/                        # PEFT LoRA adapter (gitignored)
-│   ├── adapter_config.json
-│   ├── adapter_model.safetensors   # 71 MB
-│   └── README.md
-├── CLIENT_TIMEOUT_TROUBLESHOOTING.md
-├── CLIENT_UI.md
-└── README.md
+├── dataset/                  # Medical datasets (gitignored)
+├── models/                   # GGUF models (gitignored)
+├── output/                   # Training outputs (gitignored)
+├── trained/                  # PEFT LoRA adapter (gitignored)
+├── context.md                # Full project context
+├── NX_FIXES.md               # NX paper-readiness checklist
+├── progress.md               # Training progress log
+├── BUG_ANALYSIS.md           # Resolved bugs
+└── test_NX.md / test_AGX.md  # Hardware test reports
 ```
 
 ## Environment
 
-- **Device:** NVIDIA Jetson Orin NX 8GB (aarch64)
-- **JetPack:** R36.4.7, CUDA 12.6, Driver 540.4.0
-- **PyTorch:** 2.5.0a0+nv24.08 (Jetson-specific)
-- **Python:** 3.10+
-- **llama.cpp:** build b9453 (CPU-only, aarch64, no GPU layers)
-
-| Hardware | Memory | Use Case |
-|----------|--------|----------|
-| Jetson Orin NX | 8 GB unified | Training + Inference client |
-| Jetson AGX Orin | 32 GB+ | Inference server |
-| Desktop RTX A5000 | 24 GB | Full training pipeline |
+| Component | NX (Edge) | AGX (Server) |
+|-----------|----------|--------------|
+| **Device** | Jetson Orin NX 8GB | Jetson AGX Orin 32GB |
+| **JetPack** | R36.4.7 (CUDA 12.6) | R36.4.7 (CUDA 12.6) |
+| **PyTorch** | 2.5.0a0+nv24.08 | — |
+| **llama.cpp** | build b9453 (CPU-only) | build b9571 (CUDA) |
+| **bitsandbytes** | 0.50.0.dev0 (sm_87) | — |
+| **Model** | Qwen2.5-1.5B Q4_K_M | Qwen2.5-3B Q4_K_M |
 
 ## Docs
 
-- [Client timeout troubleshooting](CLIENT_TIMEOUT_TROUBLESHOOTING.md)
-- [Client/UI architecture](CLIENT_UI.md)
+- [Full project context](context.md)
+- [NX fix checklist](NX_FIXES.md)
 - [Training progress](progress.md)
+- [Bug analysis](BUG_ANALYSIS.md)
+- [AGX test report](test_AGX.md)
+- [NX test report](test_NX.md)
+- [Client troubleshooting](CLIENT_TIMEOUT_TROUBLESHOOTING.md)
+- [Client/UI architecture](CLIENT_UI.md)
+
+## Key Findings
+
+1. **Base model outperforms LoRA** for English medical QA when LoRA was
+   trained on multilingual data — cross-lingual adapter transfer failure.
+2. **Q4_K_M is optimal** for NX edge deployment — Q5_K_M is 25% slower at
+   same size; Q8_0 has worse generation throughput.
+3. **Conservative routing wins** — uncertain queries defer to AGX, preventing
+   false positives from the lightweight classifier.
+4. **CPU-only inference is viable** on NX for 1.5B models — 15-18 tok/s
+   generation, sufficient for medical QA latency requirements.

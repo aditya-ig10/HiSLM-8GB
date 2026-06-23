@@ -1,0 +1,130 @@
+{"id":"m001","text":"What are the symptoms of pneumoconiosis?","label":1,"category":"medical"}
+{"id":"m002","text":"Explain coal dust lung disease treatment options.","label":1,"category":"medical"}
+{"id":"m003","text":"What is the recommended dosage for ibuprofen?","label":1,"category":"medical"}
+{"id":"m004","text":"How is type 2 diabetes diagnosed?","label":1,"category":"medical"}
+{"id":"m005","text":"What causes hypertension?","label":1,"category":"medical"}
+{"id":"m006","text":"Describe the treatment for bacterial pneumonia.","label":1,"category":"medical"}
+{"id":"m007","text":"What are the side effects of statins?","label":1,"category":"medical"}
+{"id":"m008","text":"How does insulin work in the body?","label":1,"category":"medical"}
+{"id":"m009","text":"What is the difference between MRI and CT scan?","label":1,"category":"medical"}
+{"id":"m010","text":"Explain the stages of cancer.","label":1,"category":"medical"}
+{"id":"m011","text":"What are common symptoms of asthma?","label":1,"category":"medical"}
+{"id":"m012","text":"How is a concussion diagnosed?","label":1,"category":"medical"}
+{"id":"m013","text":"What medications treat high cholesterol?","label":1,"category":"medical"}
+{"id":"m014","text":"Describe the recovery process after knee surgery.","label":1,"category":"medical"}
+{"id":"m015","text":"What causes food allergies?","label":1,"category":"medical"}
+{"id":"m016","text":"How does chemotherapy work?","label":1,"category":"medical"}
+{"id":"m017","text":"What is the normal range for blood pressure?","label":1,"category":"medical"}
+{"id":"m018","text":"Explain the symptoms of a heart attack.","label":1,"category":"medical"}
+{"id":"m019","text":"What vaccines are recommended for adults?","label":1,"category":"medical"}
+{"id":"m020","text":"How is depression treated?","label":1,"category":"medical"}
+{"id":"m021","text":"What causes kidney stones?","label":1,"category":"medical"}
+{"id":"m022","text":"Describe the symptoms of anaphylaxis.","label":1,"category":"medical"}
+{"id":"m023","text":"What is the treatment for strep throat?","label":1,"category":"medical"}
+{"id":"m024","text":"How does the liver function in detoxification?","label":1,"category":"medical"}
+{"id":"m025","text":"What are the early signs of Alzheimer's disease?","label":1,"category":"medical"}
+{"id":"m026","text":"Explain the difference between type 1 and type 2 diabetes.","label":1,"category":"medical"}
+{"id":"m027","text":"What medications are used for asthma management?","label":1,"category":"medical"}
+{"id":"m028","text":"How is a bone fracture treated?","label":1,"category":"medical"}
+{"id":"m029","text":"What causes high blood pressure?","label":1,"category":"medical"}
+{"id":"m030","text":"Describe the symptoms of a stroke.","label":1,"category":"medical"}
+{"id":"m031","text":"What is the treatment for tuberculosis?","label":1,"category":"medical"}
+{"id":"m032","text":"How does the immune system fight infections?","label":1,"category":"medical"}
+{"id":"m033","text":"What are common heart disease risk factors?","label":1,"category":"medical"}
+{"id":"m034","text":"Explain how antibiotics work against bacteria.","label":1,"category":"medical"}
+{"id":"m035","text":"What is the recovery time for a broken leg?","label":1,"category":"medical"}
+{"id":"m036","text":"How is pneumonia treated in elderly patients?","label":1,"category":"medical"}
+{"id":"m037","text":"What causes chronic back pain?","label":1,"category":"medical"}
+{"id":"m038","text":"Describe the stages of wound healing.","label":1,"category":"medical"}
+{"id":"m039","text":"What medications are used for epilepsy?","label":1,"category":"medical"}
+{"id":"m040","text":"How is a urinary tract infection diagnosed?","label":1,"category":"medical"}
+{"id":"m041","text":"What are the complications of diabetes?","label":1,"category":"medical"}
+{"id":"m042","text":"Explain how dialysis works for kidney failure.","label":1,"category":"medical"}
+{"id":"m043","text":"What is the treatment for migraine headaches?","label":1,"category":"medical"}
+{"id":"m044","text":"How is thyroid disease diagnosed?","label":1,"category":"medical"}
+{"id":"m045","text":"What causes anemia?","label":1,"category":"medical"}
+{"id":"m046","text":"Describe the symptoms of rheumatoid arthritis.","label":1,"category":"medical"}
+{"id":"m047","text":"What is the prognosis for lung cancer?","label":1,"category":"medical"}
+{"id":"m048","text":"How does physical therapy help after surgery?","label":1,"category":"medical"}
+{"id":"m049","text":"What vaccinations do children need?","label":1,"category":"medical"}
+{"id":"m050","text":"Explain the mechanism of action of ACE inhibitors.","label":1,"category":"medical"}
+{"id":"m051","text":"What are the symptoms of a sinus infection?","label":1,"category":"medical"}
+{"id":"m052","text":"How is acid reflux disease treated?","label":1,"category":"medical"}
+{"id":"m053","text":"What causes osteoporosis?","label":1,"category":"medical"}
+{"id":"m054","text":"Describe the treatment for hepatitis C.","label":1,"category":"medical"}
+{"id":"m055","text":"What is the normal heart rate range?","label":1,"category":"medical"}
+{"id":"m056","text":"How does a pacemaker work?","label":1,"category":"medical"}
+{"id":"m057","text":"What are the symptoms of heat stroke?","label":1,"category":"medical"}
+{"id":"m058","text":"Explain how vaccines train the immune system.","label":1,"category":"medical"}
+{"id":"m059","text":"What medications treat anxiety disorders?","label":1,"category":"medical"}
+{"id":"m060","text":"How is sleep apnea diagnosed?","label":1,"category":"medical"}
+{"id":"g001","text":"What is the capital of France?","label":0,"category":"general"}
+{"id":"g002","text":"Write a Python function to sort a list.","label":0,"category":"general"}
+{"id":"g003","text":"Explain how a diesel engine works.","label":0,"category":"general"}
+{"id":"g004","text":"What is the population of Japan?","label":0,"category":"general"}
+{"id":"g005","text":"How do I cook pasta?","label":0,"category":"general"}
+{"id":"g006","text":"Explain the law of gravity.","label":0,"category":"general"}
+{"id":"g007","text":"What is the meaning of life?","label":0,"category":"general"}
+{"id":"g008","text":"Write a poem about autumn.","label":0,"category":"general"}
+{"id":"g009","text":"How does blockchain technology work?","label":0,"category":"general"}
+{"id":"g010","text":"What is the GDP of the United States?","label":0,"category":"general"}
+{"id":"g011","text":"Explain quantum computing in simple terms.","label":0,"category":"general"}
+{"id":"g012","text":"How do I change a flat tire?","label":0,"category":"general"}
+{"id":"g013","text":"What is the best way to learn a new language?","label":0,"category":"general"}
+{"id":"g014","text":"Describe the water cycle.","label":0,"category":"general"}
+{"id":"g015","text":"Who wrote Romeo and Juliet?","label":0,"category":"general"}
+{"id":"g016","text":"How does a car engine work?","label":0,"category":"general"}
+{"id":"g017","text":"What is the speed of light?","label":0,"category":"general"}
+{"id":"g018","text":"Explain how solar panels generate electricity.","label":0,"category":"general"}
+{"id":"g019","text":"How do I invest in the stock market?","label":0,"category":"general"}
+{"id":"g020","text":"What is the history of the Internet?","label":0,"category":"general"}
+{"id":"g021","text":"Write a job application letter.","label":0,"category":"general"}
+{"id":"g022","text":"How does a refrigerator work?","label":0,"category":"general"}
+{"id":"g023","text":"What are the major religions of the world?","label":0,"category":"general"}
+{"id":"g024","text":"Explain the process of photosynthesis.","label":0,"category":"general"}
+{"id":"g025","text":"How do I create a website?","label":0,"category":"general"}
+{"id":"g026","text":"What is machine learning?","label":0,"category":"general"}
+{"id":"g027","text":"Describe the structure of DNA.","label":0,"category":"general"}
+{"id":"g028","text":"Who was Albert Einstein?","label":0,"category":"general"}
+{"id":"g029","text":"How do airplanes fly?","label":0,"category":"general"}
+{"id":"g030","text":"What is the stock market?","label":0,"category":"general"}
+{"id":"g031","text":"Explain the concept of supply and demand.","label":0,"category":"general"}
+{"id":"g032","text":"How does Wi-Fi work?","label":0,"category":"general"}
+{"id":"g033","text":"What are the benefits of meditation?","label":0,"category":"general"}
+{"id":"g034","text":"Describe how to build a computer.","label":0,"category":"general"}
+{"id":"g035","text":"What causes earthquakes?","label":0,"category":"general"}
+{"id":"g036","text":"How do I start a small business?","label":0,"category":"general"}
+{"id":"g037","text":"Explain the theory of evolution.","label":0,"category":"general"}
+{"id":"g038","text":"What is the largest ocean in the world?","label":0,"category":"general"}
+{"id":"g039","text":"How does GPS work?","label":0,"category":"general"}
+{"id":"g040","text":"Write a recipe for chocolate cake.","label":0,"category":"general"}
+{"id":"g041","text":"What is the Pythagorean theorem?","label":0,"category":"general"}
+{"id":"g042","text":"How do I file taxes?","label":0,"category":"general"}
+{"id":"g043","text":"Explain how television works.","label":0,"category":"general"}
+{"id":"g044","text":"What are the planets in our solar system?","label":0,"category":"general"}
+{"id":"g045","text":"How do I improve my credit score?","label":0,"category":"general"}
+{"id":"g046","text":"Describe how batteries work.","label":0,"category":"general"}
+{"id":"g047","text":"What is the Python programming language?","label":0,"category":"general"}
+{"id":"g048","text":"How does a microwave oven heat food?","label":0,"category":"general"}
+{"id":"g049","text":"What are the principles of democracy?","label":0,"category":"general"}
+{"id":"g050","text":"Explain how a computer CPU works.","label":0,"category":"general"}
+{"id":"g051","text":"What is climate change?","label":0,"category":"general"}
+{"id":"g052","text":"How do I grow tomatoes?","label":0,"category":"general"}
+{"id":"g053","text":"Describe the Roman Empire.","label":0,"category":"general"}
+{"id":"g054","text":"What is the difference between SQL and NoSQL?","label":0,"category":"general"}
+{"id":"g055","text":"How does a compass work?","label":0,"category":"general"}
+{"id":"g056","text":"Explain what an API is.","label":0,"category":"general"}
+{"id":"g057","text":"What are the rules of chess?","label":0,"category":"general"}
+{"id":"g058","text":"How do I tie a tie?","label":0,"category":"general"}
+{"id":"g059","text":"What is the greenhouse effect?","label":0,"category":"general"}
+{"id":"g060","text":"Explain how cryptocurrency mining works.","label":0,"category":"general"}
+{"id":"e001","text":"Hello!","label":1,"category":"greeting"}
+{"id":"e002","text":"Hi there","label":1,"category":"greeting"}
+{"id":"e003","text":"Good morning","label":1,"category":"greeting"}
+{"id":"e004","text":"Hey, how are you?","label":1,"category":"greeting"}
+{"id":"e005","text":"What's up?","label":1,"category":"greeting"}
+{"id":"e006","text":"Good evening","label":1,"category":"greeting"}
+{"id":"e007","text":"Nice to meet you","label":1,"category":"greeting"}
+{"id":"e008","text":"How's it going?","label":1,"category":"greeting"}
+{"id":"e009","text":"Greetings","label":1,"category":"greeting"}
+{"id":"e010","text":"Thank you","label":1,"category":"greeting"}

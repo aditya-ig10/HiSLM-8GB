@@ -1,0 +1,21 @@
+[Unit]
+Description=HiSLM NX Inference Subserver — Medical QA on Edge
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nvidia
+WorkingDirectory=/home/nvidia/llama/HiSLM-8G
+Environment=CUDA_LAUNCH_BLOCKING=1
+Environment=TOKENIZERS_PARALLELISM=false
+Environment=PYTHONFAULTHANDLER=1
+ExecStartPre=/bin/sleep 5
+ExecStart=/home/nvidia/llama/HiSLM-8G/venv/bin/python /home/nvidia/llama/HiSLM-8G/subserver.py --agx-ip 100.120.59.117 --agx-port 8000 --port 8765 --node-name nx-subserver
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/nvidia/llama/HiSLM-8G/output/subserver.log
+StandardError=append:/home/nvidia/llama/HiSLM-8G/output/subserver.log
+
+[Install]
+WantedBy=multi-user.target

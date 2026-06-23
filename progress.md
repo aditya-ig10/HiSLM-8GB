@@ -34,10 +34,15 @@ Both 500 and 2000 sample configs now train stably with 0.9-1.0GB free memory.
 - `train.py` — manual training loop with diagnostics, working
 - `train.sh` — launcher with exit code capture
 - `test_step.py` — minimal proof-of-concept (still valid)
-- `output/lora_adapter/` — saved LoRA adapter from 500-sample run
+- `output/lora_adapter/` — saved LoRA adapter from 500-sample run (r=8)
+- `output/lora_r4/lora_adapter/` — QLoRA ablation r=4
+- `output/lora_r8/lora_adapter/` — QLoRA ablation r=8
+- `output/lora_r16/lora_adapter/` — QLoRA ablation r=16
 - `output/training.log` — latest training log
 - `output/train_log.txt` — per-step loss/lr/mem log
 - `output/signal_death.log` — signal diagnostics (empty if clean exit)
+- `output/quant_benchmark.json` — Q4_K_M/Q5_K_M/Q8_0 benchmark results
+- `output/train_ablation_r4.log`, `r8.log`, `r16.log` — ablation logs
 
 ## Training Hyperparams (working)
 | Param | Value |
@@ -55,12 +60,65 @@ Both 500 and 2000 sample configs now train stably with 0.9-1.0GB free memory.
 | Time/sample | ~2.5s (with CUDA_LAUNCH_BLOCKING=1) |
 | Free memory | 0.9-1.0GB stable during training |
 
-## To Do
+## Training Stability Report (for Paper)
+
+| Metric | Value |
+|--------|-------|
+| **Epochs tested** | 1, 2, 3 |
+| **Stable sample range** | 500–2000 |
+| **Failure mode** | Silent death at step ~40 with >2000 samples (GPU watchdog timeout) |
+| **Fix applied** | `CUDA_LAUNCH_BLOCKING=1` + manual PyTorch loop + signal trapping |
+| **Loss at convergence** | ~1.68 (500 samples, 20.6 min) → expected ~0.8–1.2 with full dataset |
+| **Training time/sample** | ~2.5s → 500 samples ≈ 21 min, 2000 samples ≈ 83 min |
+| **Full 219k estimate** | ~150 hours on NX; 4–6 hours on A5000 (bf16, batch=8) |
+| **LoRA rank ablation** | r=4, 8, 16 tested on 500-sample subset (r=8 best: start 2.98→final 1.42 loss). r=4: 3.53→1.49, r=16: 3.44→1.52. All stable with GPU acceleration via bitsandbytes sm_87. |
+| **Memory stability** | 0.9–1.0 GB free throughout training, no fragmentation growth |
+| **Signal trapping** | SIGTERM/SIGINT/SIGHUP/SIGUSR1/2/SIGABRT/SIGQUIT caught with full stack trace dump |
+
+## NX Fixes — Testing Results (2026-06-23)
+
+### ✅ Completed (no AGX needed)
+
+| Fix | Result |
+|-----|--------|
+| **FIX-NX-01** — Classifier eval | 130 queries, 72.3% accuracy, 0 errors. Keyword filter catches 26% in <0.01ms |
+| **FIX-NX-02** — Routing overhead | HiSLM always slower than Always-AGX (+3-11s). Energy savings: ~100J/query |
+| **FIX-NX-04** — Energy measurement | Idle 7.38W → Load 12.28W. Marginal 4.89W, ~100J per medical query |
+| **FIX-NX-05** — Domain clarity | Framed as "Medical QA on edge" — dataset is correct |
+| **FIX-NX-08** — Timing instrument | Per-query classify_ms/inference_ms/total_ms logged to AGX |
+| **FIX-NX-10** — Systemd service | `hislm-nx.service` ready to deploy |
+| **FIX-NX-11** — Stability report | Added to `progress.md` and `context.md` |
+
+### ✅ Completed
+
+| Fix | Result |
+|-----|--------|
+| **FIX-NX-07** — QLoRA ablation | r=4: 3.53→1.49, r=8: 2.98→1.42, r=16: 3.44→1.52. All stable on GPU (0.85-1.28 GB free). r=8 optimal. |
+| **FIX-NX-09** — Quantization ablation | Q4_K_M: 57.1/15.3 PP/TG, Q5_K_M: 43.7/11.5, Q8_0: 62.3/13.1. Q4_K_M best tradeoff. |
+
+### ⏳ Pending
+
+| Fix | Est. effort | Why |
+|-----|-------------|-----|
+| **FIX-NX-06** — Baseline comparison | ~3-4 hrs | Needs AGX running to compare Always-NX/Always-AGX/HiSLM modes |
+
+## New Files
+- `eval_routing.jsonl` — 130 labeled queries
+- `eval_classifier.py` — classifier metrics
+- `analysis_routing_overhead.py` — break-even analysis
+- `measure_nx_queries.py` — benchmark harness
+- `parse_tegrastats.py` — power log parser (AGX + NX format)
+- `eval_baseline.py` — three-mode comparison (needs AGX)
+- `hislm-nx.service` — systemd unit
+- `nx_test_results.json` — all test data
+- Modified: `subserver.py` (keyword filter, /classify, timing), `context.md`, `README.md`
+
+## Training To Do
 - [ ] Run full training on more samples (2000+) — takes ~83 min for 2000
 - [ ] Train with seq_len=256 (currently 128, needs memory testing)
-- [ ] GGUF merge + conversion
+- [ ] GGUF merge + conversion (use A5000 pipeline for full dataset)
 - [ ] Evaluate model on medical QA benchmark
-- [ ] Try full 219k dataset (estimate: ~150 hours)
+- [ ] Try full 219k dataset (estimate: ~150 hours NX; 4–6h A5000)
 
 ## Commands
 ```bash
