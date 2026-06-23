@@ -24,7 +24,7 @@ MODEL = os.path.expanduser(
 LLAMA_CLI = os.path.expanduser(
     "~/llama/llama.cpp/build-x64-linux-gcc-release/bin/llama-cli"
 )
-ORIN_HTML = os.path.join(os.path.dirname(__file__), "orin_index.html")
+ORIN_HTML = os.path.join(os.path.dirname(__file__), "web", "orin_index.html")
 
 app = Flask(__name__)
 sock = Sock(app)

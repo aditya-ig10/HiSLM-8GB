@@ -3,10 +3,10 @@
 eval_classifier.py — Evaluate routing classifier on labeled eval set.
 
 Usage:
-  python eval_classifier.py \
-    --queries eval_routing.jsonl \
+    python eval_classifier.py \
+    --queries data/eval_routing.jsonl \
     --server http://localhost:8765 \
-    --output classifier_eval_results.json
+    --output results/classifier_eval_results.json
 """
 
 import argparse
@@ -20,11 +20,11 @@ import requests
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate routing classifier")
-    parser.add_argument("--queries", default="eval_routing.jsonl",
+    parser.add_argument("--queries", default="data/eval_routing.jsonl",
                         help="Path to labeled queries JSONL")
     parser.add_argument("--server", default="http://localhost:8765",
                         help="Subserver base URL")
-    parser.add_argument("--output", default="classifier_eval_results.json",
+    parser.add_argument("--output", default="results/classifier_eval_results.json",
                         help="Output results file")
     args = parser.parse_args()
 

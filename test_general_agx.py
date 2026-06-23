@@ -5,7 +5,7 @@ import json, requests, time, sys
 
 AGX = "http://100.120.59.117:8000"
 
-with open("eval_routing.jsonl") as f:
+with open("data/eval_routing.jsonl") as f:
     queries = [json.loads(l) for l in f if l.strip()]
 
 general = [q for q in queries if q["label"] == 0]
@@ -49,6 +49,6 @@ print(f"  Avg resp: {sum(lens)/len(lens):.0f} chars")
 print(f"  Min lat:  {min(lats):.2f}s")
 print(f"  Max lat:  {max(lats):.2f}s")
 
-with open("agx_general_results.json", "w") as f:
+with open("results/agx_general_results.json", "w") as f:
     json.dump({"results": results}, f, indent=2)
-print(f"\nSaved to agx_general_results.json")
+print(f"\nSaved to results/agx_general_results.json")

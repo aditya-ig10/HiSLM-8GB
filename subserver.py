@@ -50,7 +50,7 @@ try:
     _BASE = os.path.dirname(os.path.abspath(__file__))
 except NameError:
     _BASE = "."
-ORIN_HTML = os.path.join(_BASE, "orin_index.html")
+ORIN_HTML = os.path.join(_BASE, "web", "orin_index.html")
 
 app = Flask(__name__)
 sock = Sock(app)

@@ -16,7 +16,7 @@
 
 NX_HOST="100.85.30.17"
 NX_USER="nvidia"
-PEM_KEY="$(dirname "$0")/hislm-remote.pem"
+PEM_KEY="$(dirname "$0")/../hislm-remote.pem"
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30"
 
 echo_bold() { printf "\033[1m%s\033[0m\n" "$1"; }
@@ -177,7 +177,7 @@ cmd_default() {
   else
     echo_red "  ✗ xRDP is not running on NX"
     echo "  Run this on NX to install:"
-    echo "    cd ~/llama/HiSLM-8G && chmod +x setup-remote-desktop.sh && ./setup-remote-desktop.sh"
+    echo "    cd ~/llama/HiSLM-8G && chmod +x scripts/setup-remote-desktop.sh && ./scripts/setup-remote-desktop.sh"
     exit 1
   fi
   

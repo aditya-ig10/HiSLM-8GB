@@ -293,7 +293,7 @@ def main():
         },
         "modes": modes_results,
     }
-    with open("baseline_test_results.json", "w") as f:
+    with open("results/baseline_test_results.json", "w") as f:
         json.dump(output, f, indent=2)
     print(f"\n  Raw results saved to baseline_test_results.json")
 

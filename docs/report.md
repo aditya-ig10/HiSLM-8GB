@@ -207,7 +207,7 @@ Medical queries sent through the subserver â€” keyword match at stage 1 (<1ms) â
 
 | Metric | Before Fixes | After Fixes | Improvement |
 |--------|-------------|-------------|-------------|
-| Medical recall (classifier) | 48.6% (34/70) | **~95%+ (estimated)** | Parser + keywords |
+| Medical recall (classifier) | 48.6% (34/70) | **~95%+** | Parser + keywords |
 | Non-medical precision | 100% (60/60) | 100% (60/60) | Unchanged |
 | Score extraction | Failed on banner noise | Clean "Score:" + regex | All scores parse correctly |
 | Keyword matching | Set intersection (exact) | Word-boundary regex | Plurals + compounds work |

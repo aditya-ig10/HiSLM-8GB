@@ -276,20 +276,38 @@ HiSLM-8G/
 ├── server_qwen.py            # Standalone NX inference server
 ├── train.py                  # QLoRA fine-tuning (manual loop, TinyLlama-1.1B)
 ├── preprocess.py             # Dataset preprocessing (3 datasets → 224k pairs)
-├── eval_classifier.py        # Classifier evaluation (130 queries)
-├── eval_baseline.py          # Three-mode comparison script
-├── analysis_routing_overhead.py  # Routing break-even analysis
-├── measure_nx_queries.py     # NX inference benchmark harness
-├── parse_tegrastats.py       # Power log parser
-├── eval_routing.jsonl        # 130 labeled eval queries
-├── hislm-nx.service          # Systemd unit for auto-restart
 ├── client.py                 # LAN client
 ├── client2.py                # Tailscale wireless client
 ├── client_2.py               # Generic client
-├── orin_index.html           # Standalone chat UI (1573 lines)
-├── static/
-│   ├── index.html            # AGX server chat UI
-│   └── nx_index.html         # NX wireless client UI
+├── scripts/                  # Shell scripts + systemd service
+│   ├── hislm-nx.service      # Systemd unit for auto-restart
+│   ├── hislm-remote.sh       # MacBook remote control
+│   ├── run_qwen_web.sh       # Start server + ngrok
+│   ├── remote-desktop.sh     # RDP tunnel to MacBook
+│   ├── setup-remote-desktop.sh  # xRDP installer for NX
+│   └── train.sh              # Training launcher
+├── web/                      # Web UIs
+│   ├── orin_index.html       # Standalone chat UI
+│   └── static/
+│       ├── index.html        # AGX server chat UI
+│       └── nx_index.html     # NX wireless client UI
+├── data/                     # Reference data
+│   └── eval_routing.jsonl    # 130 labeled eval queries
+├── results/                  # Generated benchmarks (gitignored)
+├── docs/                     # Documentation
+│   ├── README.md             # This file
+│   ├── report.md             # Full test report
+│   ├── context.md            # Project context
+│   ├── NX_FIXES.md           # Paper-readiness checklist
+│   ├── BUG_ANALYSIS.md       # Resolved bugs
+│   ├── progress.md           # Training progress log
+│   ├── CLIENT_UI.md          # Client/UI architecture
+│   ├── CLIENT_TIMEOUT_TROUBLESHOOTING.md
+│   ├── test_AGX.md           # AGX hardware test report
+│   ├── test_NX.md            # NX hardware test report
+│   ├── Qwen2.5-3B-benchmark(1).md
+│   ├── REMOTE_ACCESS.md      # Remote access guide
+│   └── REMOTE_DESKTOP.md     # Remote desktop guide
 ├── a5000_training/           # Desktop GPU training pipeline
 │   ├── train_a5000.py
 │   ├── merge_and_convert.py
@@ -298,12 +316,11 @@ HiSLM-8G/
 ├── models/                   # GGUF models (gitignored)
 ├── output/                   # Training outputs (gitignored)
 ├── trained/                  # PEFT LoRA adapter (gitignored)
-├── context.md                # Full project context
-├── NX_FIXES.md               # NX paper-readiness checklist
-├── progress.md               # Training progress log
-├── BUG_ANALYSIS.md           # Resolved bugs
-└── test_NX.md / test_AGX.md  # Hardware test reports
+├── venv/                     # Python venv (gitignored)
+└── .gitignore
 ```
+
+All eval scripts (`eval_*.py`, `analysis_*.py`, `measure_*.py`, `parse_*.py`, `baseline_test.py`, `test_*.py`) live in the project root. Output results are written to `results/`. Reference eval data is in `data/`.
 
 ## Environment
 
@@ -318,7 +335,8 @@ HiSLM-8G/
 
 ## Docs
 
-- [Full project context](context.md)
+- [Full test report](report.md)
+- [Project context](context.md)
 - [NX fix checklist](NX_FIXES.md)
 - [Training progress](progress.md)
 - [Bug analysis](BUG_ANALYSIS.md)

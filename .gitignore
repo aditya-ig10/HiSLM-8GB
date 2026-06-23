@@ -53,6 +53,4 @@ Thumbs.db
 *.pem.pub
 
 # Generated eval / benchmark results (regeneratable from eval scripts)
-classifier_eval_results*.json
-nx_test_results.json
-overhead_analysis*.json
+results/

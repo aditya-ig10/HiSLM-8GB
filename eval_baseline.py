@@ -7,8 +7,8 @@ response quality, and energy estimates.
 
 Usage:
   # AGX server must be running and reachable
-  python eval_baseline.py --queries eval_routing.jsonl --output baseline_comparison.json
-  python eval_baseline.py --queries eval_routing.jsonl --mode hislm --output hislm_only.json
+  python eval_baseline.py --queries data/eval_routing.jsonl --output results/baseline_comparison.json
+  python eval_baseline.py --queries data/eval_routing.jsonl --mode hislm --output results/hislm_only.json
 """
 
 import argparse
@@ -129,7 +129,7 @@ def compute_quality_metrics(all_results: dict[str, list[dict]]) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Baseline comparison")
-    parser.add_argument("--queries", default="eval_routing.jsonl",
+    parser.add_argument("--queries", default="data/eval_routing.jsonl",
                         help="Labeled queries JSONL")
     parser.add_argument("--mode", default="all",
                         choices=["all", "always_nx", "always_agx", "hislm"],

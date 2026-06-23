@@ -5,7 +5,7 @@ import json, requests, time, sys
 
 NX = "http://localhost:8765"
 
-with open("eval_routing.jsonl") as f:
+with open("data/eval_routing.jsonl") as f:
     queries = [json.loads(l) for l in f if l.strip()]
 
 medical = [q for q in queries if q["label"] == 1 and q["category"] == "medical"]
@@ -71,7 +71,7 @@ if lats:
         if c:
             print(f"    {bucket[0]:>3d}-{bucket[1]:>3d}s: {c:>3d} ({c/len(lats)*100:.0f}%)")
 
-with open("nx_medical_results.json", "w") as f:
+with open("results/nx_medical_results.json", "w") as f:
     json.dump({"summary": {
         "total": len(results), "ok": len(oks), "errors": len(results)-len(oks),
         "avg_latency_s": round(sum(lats)/len(lats),2) if lats else 0,
