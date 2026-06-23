@@ -69,17 +69,41 @@ CONFIDENCE_THRESHOLD = 0.7
 # ── Classification ──────────────────────────────────────────────────
 
 MEDICAL_KEYWORDS = {
-    "symptom", "diagnosis", "treatment", "disease", "patient",
-    "medication", "dosage", "surgery", "health", "medical",
-    "clinical", "drug", "infection", "therapy", "therapist",
-    "doctor", "nurse", "hospital", "clinic", "prescription",
-    "pain", "fever", "cough", "injury", "wound", "vaccine",
-    "antibiotic", "surgery", "examination", "test result",
-    "blood", "heart", "lung", "brain", "cancer", "diabetes",
-    "hypertension", "pneumonia", "asthma", "allergy",
+    # ── Core medical terms (stems cover plurals via substring matching) ──
+    "symptom", "diagnosis", "diagnose", "treatment", "treat", "disease",
+    "patient", "medication", "dosage", "surgery", "surgical",
+    "health", "medical", "medicine", "clinical", "clinic",
+    "drug", "infection", "therapy", "therapist",
+    "doctor", "physician", "nurse", "hospital",
+    "prescription", "pharmacy", "pharmaceutical",
+    "pain", "fever", "cough", "injury", "wound", "wound",
+    "vaccine", "vaccination", "antibiotic",
+    "examination", "exam", "test result", "lab result",
+    "blood", "heart", "cardiac", "lung", "pulmonary", "brain",
+    "cancer", "tumor", "diabetes", "diabetic",
+    "hypertension", "blood pressure", "cholesterol",
+    "pneumonia", "asthma", "allergy", "allergic",
+    "stroke", "seizure", "concussion", "depression", "anxiety",
+    "epilepsy", "arthritis", "obesity", "insulin",
+    "kidney", "renal", "liver", "hepatic", "bone", "fracture",
+    "muscle", "joint", "spine", "spinal", "skin", "rash",
+    "nausea", "vomiting", "dizziness", "fatigue", "swelling",
+    "chemotherapy", "radiation", "dialysis", "transplant",
+    "MRI", "CT scan", "X-ray", "ultrasound", "endoscopy",
+    "symptom", "symptoms",  # explicit plurals
+    "medications", "infections", "diseases", "treatments",
+    "diagnosed", "prescribed", "hospitalized",
+    "recovery", "rehabilitation", "physiotherapy",
+    "diet", "nutrition", "exercise", "wellness",
+    "emergency", "ambulance", "first aid",
+    "overdose", "poisoning", "side effect", "side effects",
+    "statins", "opioid", "anesthesia",
+    "pulse", "temperature", "weight", "height",
+    # ── Greetings & common social phrases ──
     "hello", "hi", "hey", "greetings", "good morning",
     "good evening", "good afternoon", "howdy", "how are you",
     "what's up", "nice to meet you", "thank you", "thanks",
+    "how's it going", "what's new", "long time no see",
 }
 
 CLASSIFY_SCORE_PROMPT = (
@@ -94,18 +118,33 @@ CLASSIFY_SCORE_PROMPT = (
 
 # ── Probabilitic confidence helpers ─────────────────────────────────
 
-N_SAMPLES = 2              # LLM calls per classify (keyword match bypasses)
-TEMP_SCHEDULE = [0.0, 0.5]  # deterministic + mildly stochastic
+N_SAMPLES = 3              # LLM calls per classify
+TEMP_SCHEDULE = [0.0, 0.4, 0.8]  # deterministic + mild + moderate stochastic
 
 
 def _parse_score(raw: str) -> float | None:
-    """Extract a 0.0–1.0 float from model output."""
-    m = re.search(r"([01](?:\.\d+)?|\.\d+)", raw.strip())
+    """Extract a 0.0–1.0 float from model output.
+    
+    Strips the llama-cli banner (everything before the last "Score: ")
+    to avoid picking up numbers from the ASCII art or perf stats.
+    """
+    text = raw.strip()
+    # Keep only text after the last "Score:" marker to skip banner
+    idx = text.rfind("Score:")
+    if idx >= 0:
+        text = text[idx + len("Score:"):].strip()
+    # Also strip after [Prompt: or [ Generation to skip perf stats
+    for marker in ["[Prompt:", "[ Generation:", "[ prompt:", "Exiting", "\n>"]:
+        m = text.find(marker)
+        if m >= 0:
+            text = text[:m].strip()
+    # Now parse the remaining text for 0.0-1.0
+    m = re.search(r"([01](?:\.\d+)?|\.\d+)", text)
     if m:
         val = float(m.group(1))
         if 0.0 <= val <= 1.0:
             return val
-    m = re.search(r"[01]", raw)
+    m = re.search(r"[01]", text)
     if m:
         return float(m.group())
     return None
@@ -118,7 +157,7 @@ def _run_llama_score(query: str, temp: float, timeout_s: int = 30) -> float | No
         LLAMA_CLI, "-m", MODEL,
         "-p", prompt,
         "-n", "8",
-        "--no-display-prompt", "--single-turn", "--simple-io",
+        "--no-display-prompt", "--single-turn", "--simple-io", "--log-disable",
         "-c", "512", "--temp", str(temp),
     ]
     try:
@@ -290,10 +329,13 @@ def classify_with_confidence(query: str) -> dict:
     t0 = time.time()
 
     # Stage 1: keyword pre-filter (instant → high confidence)
-    words = set(query.lower().split())
-    clean_words = {w.strip(".,!?;:'\"()[]") for w in words}
-    kw_count = sum(1 for w in clean_words if w in MEDICAL_KEYWORDS)
-    kw_ratio = kw_count / max(len(clean_words), 1)
+    query_lower = query.lower()
+    kw_count = 0
+    for kw in MEDICAL_KEYWORDS:
+        # Use word-boundary matching to avoid "hi" matching "history"
+        if re.search(r'\b' + re.escape(kw) + r'\b', query_lower):
+            kw_count += 1
+    kw_ratio = min(kw_count / 5.0, 1.0)  # 5+ keyword hits = max ratio
 
     if kw_count > 0:
         elapsed = (time.time() - t0) * 1000
@@ -304,7 +346,7 @@ def classify_with_confidence(query: str) -> dict:
             "p_med": 1.0, "confidence": 0.95, "kl_div": 1.0,
             "mean_score": 0.95, "std_score": 0.0, "n_samples": 1, "scores": [0.95],
         }
-        kmeans = update_kmeans(0.95, 1.0, kw_ratio, len(clean_words))
+        kmeans = update_kmeans(0.95, 1.0, kw_ratio, len(query))
         return {
             "is_medical": True,
             "confidence": 0.95,
@@ -329,17 +371,18 @@ def classify_with_confidence(query: str) -> dict:
             "is_medical": True, "confidence": 0.5, "method": "all_failed",
             "p_med": 0.5, "kl_div": 0.0, "mean_score": 0.5, "std_score": 0.0,
             "n_samples": 0, "scores": [],
-            "kmeans": update_kmeans(0.5, 0.0, kw_ratio, len(clean_words)),
+            "kmeans": update_kmeans(0.5, 0.0, kw_ratio, len(query)),
         }
 
     metrics = _compute_metrics(scores)
     p_med = metrics["p_med"]
     confidence = metrics["confidence"]
     kl = metrics["kl_div"]
-    is_med = p_med >= 0.5
+    # Use mean_score >= 0.4 as threshold (smoother than binary voting with few samples)
+    is_med = metrics["mean_score"] >= 0.4
 
     # K-means clustering
-    kmeans = update_kmeans(confidence, kl, kw_ratio, len(clean_words))
+    kmeans = update_kmeans(confidence, kl, kw_ratio, len(query))
 
     elapsed = (time.time() - t0) * 1000
     log.info(
@@ -762,7 +805,7 @@ def ws_chat(ws):
             f"Query: {user_msg[:60]!r}  "
             f"is_med={is_med}  c={conf:.3f}  "
             f"kl={result.get('kl_div', 0):.2f}  "
-            f"kmeans={result.get('kmeans', {}).get('label', '?')}  "
+        f"kmeans={(result.get('kmeans') or {}).get('label', '?')}  "
             f"route={'AGX' if route_agx else 'NX'}"
         )
 
