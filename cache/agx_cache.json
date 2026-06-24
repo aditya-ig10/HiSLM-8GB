@@ -1,0 +1,28 @@
+{
+  "queries": {
+    "7b39727136e4dc97158ca440dcc0c184": {
+      "query": "hellooooo",
+      "response": "Hi there! How can I assist you today?",
+      "route_reason": "not medical",
+      "timestamp": 1782306435.3566844,
+      "access_count": 0
+    },
+    "3c832afabea366f7af3dd49c6079e0f8": {
+      "query": "speed of light?",
+      "response": "The speed of light is approximately 299,792 kilometers per second (km/s), which can also be expressed as about \\(3 \\times 10^8\\) meters per second (\\(m/s\\)). This constant value applies across all inertial reference frames in a vacuum and has been verified through numerous experiments.",
+      "route_reason": "not medical",
+      "timestamp": 1782306721.0275724,
+      "access_count": 0
+    },
+    "e53f986a8ded3e87106436ceaa82741d": {
+      "query": "write a python function for fibonacci series",
+      "response": "Here's the Python code to generate Fibonacci numbers using recursion:\n\n```python\ndef fib(n):\nif n <= 1:\nreturn n\nelse:\nreturn (fib(n-2) + fib(n - 1))\n\n# Test the function with an input of your choice, for example:\nprint(fib(7)) # Output will be '8'\n```\n\nThis code defines a recursive `fib` function that calculates Fibonacci numbers. The base case is when n equals either zero or one (where both return their respective values), otherwise it calls itself twice to calculate the sum of two previous Fibonnaci Numbers.",
+      "route_reason": "not medical",
+      "timestamp": 1782306773.1028552,
+      "access_count": 0
+    }
+  },
+  "count": 3,
+  "trained_count": 0,
+  "training_triggered": false
+}

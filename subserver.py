@@ -17,6 +17,7 @@ Usage:
   python subserver.py --agx-ip 100.x.y.z --port 9000
 """
 
+import hashlib
 import json
 import logging
 import math
@@ -24,6 +25,7 @@ import os
 import queue
 import re
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -50,7 +52,7 @@ try:
     _BASE = os.path.dirname(os.path.abspath(__file__))
 except NameError:
     _BASE = "."
-ORIN_HTML = os.path.join(_BASE, "web", "orin_index.html")
+ORIN_HTML = os.path.join(_BASE, "web", "nx_index.html")
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -58,6 +60,224 @@ sock = Sock(app)
 agx_host: str = ""
 agx_port: int = 8000
 node_name: str = "nx-subserver"
+
+NX_SYSTEM_PROMPT = (
+    "You are a knowledgeable medical AI assistant. "
+    "Answer the user's medical question directly and concisely. "
+    "Use numbered lists only when listing multiple items is genuinely helpful. "
+    "Do not repeat the same generic advice across different questions. "
+    "If you do not know the answer, say so."
+)
+
+# ── Query Cache (AGX responses) ────────────────────────────────────
+CACHE_PATH = os.path.join(_BASE, "cache", "agx_cache.json")
+RETRAIN_THRESHOLD = 50
+
+
+class QueryCache:
+    """Persistent cache of AGX responses for repeat queries."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self.lock = threading.Lock()
+        self.data = self._load()
+
+    def _load(self) -> dict:
+        try:
+            with open(self.path) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"queries": {}, "count": 0, "trained_count": 0, "training_triggered": False}
+
+    def _save(self):
+        d = os.path.dirname(self.path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(self.path, "w") as f:
+            json.dump(self.data, f, indent=2)
+
+    @staticmethod
+    def _fingerprint(query: str) -> str:
+        return hashlib.md5(query.strip().lower().encode()).hexdigest()
+
+    def lookup(self, query: str) -> tuple[str, str] | None:
+        key = self._fingerprint(query)
+        with self.lock:
+            entry = self.data["queries"].get(key)
+            if entry:
+                entry["access_count"] = entry.get("access_count", 0) + 1
+                self._save()
+                reason = entry.get("route_reason", "cached")
+                return (entry["response"], reason)
+        return None
+
+    def store(self, query: str, response: str, route_reason: str = ""):
+        key = self._fingerprint(query)
+        with self.lock:
+            if key not in self.data["queries"]:
+                self.data["queries"][key] = {
+                    "query": query,
+                    "response": response,
+                    "route_reason": route_reason,
+                    "timestamp": time.time(),
+                    "access_count": 0,
+                }
+                self.data["count"] = len(self.data["queries"])
+                self._save()
+
+    def get_training_data(self) -> list[dict]:
+        with self.lock:
+            return [
+                {"instruction": v["query"], "output": v["response"]}
+                for v in self.data["queries"].values()
+            ]
+
+    def size(self) -> int:
+        with self.lock:
+            return self.data["count"]
+
+    def check_trigger(self) -> bool:
+        """Return True if we should start retraining."""
+        with self.lock:
+            thresh = self.data.get("retrain_threshold", RETRAIN_THRESHOLD)
+            if self.data["count"] >= thresh and not self.data.get("training_triggered"):
+                self.data["training_triggered"] = True
+                self.data["trained_at_count"] = self.data["count"]
+                self._save()
+                return True
+            return False
+
+
+cache = QueryCache(CACHE_PATH)
+
+# ── Performance Tracker ────────────────────────────────────────────
+# Estimates recall and accuracy by using keyword pre-filter as
+# pseudo-ground-truth for medical queries.
+# Triggers retraining when metrics degrade below thresholds.
+
+PERF_WINDOW = 200
+RETRAIN_RECALL_THRESHOLD = 0.80
+RETRAIN_ACCURACY_THRESHOLD = 0.70
+PERF_CHECK_INTERVAL = 50  # check metrics every N classifications
+
+
+class PerformanceTracker:
+    """Track classifier performance over a sliding window."""
+
+    def __init__(self, window_size: int = PERF_WINDOW):
+        self.window: deque = deque(maxlen=window_size)
+        self.lock = threading.Lock()
+        self._classifications_since_check = 0
+
+    def record(self, kw_count: int, p_med: float, confidence: float,
+               kl_div: float, method: str, route: str):
+        with self.lock:
+            self.window.append({
+                "kw_count": kw_count,
+                "p_med": p_med,
+                "confidence": confidence,
+                "kl_div": kl_div,
+                "method": method,
+                "route": route,
+                "timestamp": time.time(),
+            })
+            self._classifications_since_check += 1
+
+    def estimated_recall(self) -> float:
+        """Proxy recall: among keyword-matched queries, % that route to NX."""
+        with self.lock:
+            kw_hits = [r for r in self.window if r["kw_count"] > 0]
+            if not kw_hits:
+                return 1.0
+            ok = sum(1 for r in kw_hits if r["route"] == "NX")
+            return ok / len(kw_hits)
+
+    def estimated_accuracy(self) -> float:
+        """Proxy accuracy: keyword→NX + no-keyword→AGX over total."""
+        with self.lock:
+            if not self.window:
+                return 1.0
+            correct = sum(
+                1 for r in self.window
+                if (r["kw_count"] > 0 and r["route"] == "NX")
+                or (r["kw_count"] == 0 and r["route"] == "AGX")
+            )
+            return correct / len(self.window)
+
+    def check_trigger(self) -> dict:
+        """Check if performance metrics warrant retraining.
+
+        Returns {"trigger": True/False, "recall": ..., "accuracy": ...}
+        """
+        with self.lock:
+            if self._classifications_since_check < PERF_CHECK_INTERVAL:
+                return {"trigger": False}
+            self._classifications_since_check = 0
+
+        rec = self.estimated_recall()
+        acc = self.estimated_accuracy()
+        triggered = rec < RETRAIN_RECALL_THRESHOLD or acc < RETRAIN_ACCURACY_THRESHOLD
+        return {"trigger": triggered, "recall": round(rec, 4), "accuracy": round(acc, 4)}
+
+    def summary(self) -> dict:
+        rec = self.estimated_recall()
+        acc = self.estimated_accuracy()
+        with self.lock:
+            total = len(self.window)
+            kw = sum(1 for r in self.window if r["kw_count"] > 0)
+            nx = sum(1 for r in self.window if r["route"] == "NX")
+            agx = sum(1 for r in self.window if r["route"] == "AGX")
+        return {
+            "window": total,
+            "recall": round(rec, 4),
+            "accuracy": round(acc, 4),
+            "keyword_queries": kw,
+            "routed_nx": nx,
+            "routed_agx": agx,
+            "recall_threshold": RETRAIN_RECALL_THRESHOLD,
+            "accuracy_threshold": RETRAIN_ACCURACY_THRESHOLD,
+        }
+
+
+perf = PerformanceTracker()
+
+# ── Conversation History (per-session NX context) ────────────────────
+
+MAX_HISTORY_EXCHANGES = 10  # pairs per session
+
+
+class ConversationHistory:
+    """Per-session message store for NX conversational context."""
+
+    def __init__(self):
+        self._store: dict[str, list[dict]] = {}
+        self._lock = threading.Lock()
+
+    def add(self, session_id: str, role: str, content: str):
+        if not content:
+            return
+        with self._lock:
+            if session_id not in self._store:
+                self._store[session_id] = []
+            self._store[session_id].append({"role": role, "content": content})
+            max_len = MAX_HISTORY_EXCHANGES * 2
+            if len(self._store[session_id]) > max_len:
+                self._store[session_id] = self._store[session_id][-max_len:]
+
+    def get(self, session_id: str) -> list[dict]:
+        with self._lock:
+            return list(self._store.get(session_id, []))
+
+    def clear(self, session_id: str):
+        with self._lock:
+            self._store.pop(session_id, None)
+
+    def size(self, session_id: str) -> int:
+        with self._lock:
+            return len(self._store.get(session_id, []))
+
+
+conversation = ConversationHistory()
 
 # ── Routing thresholds ───────────────────────────────────────────────
 # Only route to NX if both:
@@ -352,6 +572,7 @@ def classify_with_confidence(query: str) -> dict:
             "confidence": 0.95,
             "method": "keyword",
             "kmeans": kmeans,
+            "kw_count": kw_count,
             **metrics,
         }
 
@@ -371,6 +592,7 @@ def classify_with_confidence(query: str) -> dict:
             "is_medical": True, "confidence": 0.5, "method": "all_failed",
             "p_med": 0.5, "kl_div": 0.0, "mean_score": 0.5, "std_score": 0.0,
             "n_samples": 0, "scores": [],
+            "kw_count": kw_count,
             "kmeans": update_kmeans(0.5, 0.0, kw_ratio, len(query)),
         }
 
@@ -396,6 +618,7 @@ def classify_with_confidence(query: str) -> dict:
         "confidence": round(confidence, 4),
         "method": "llm",
         "kmeans": kmeans,
+        "kw_count": kw_count,
         **metrics,
         "scores": [round(s, 4) for s in scores],
     }
@@ -535,13 +758,16 @@ def agx_base_url() -> str:
     return f"http://{agx_host}:{agx_port}"
 
 
-def fetch_from_agx(query: str) -> str:
+def fetch_from_agx(query: str, messages: list[dict] | None = None) -> str:
     base = agx_base_url()
-    log.info(f"Forwarding to AGX: {base}/send")
+    payload = {"sender": node_name, "text": query}
+    if messages:
+        payload["messages"] = messages
+    log.info(f"Forwarding to AGX: {base}/send  (history={len(messages or [])} msgs)")
     try:
         r = requests.post(
             f"{base}/send",
-            json={"sender": node_name, "text": query},
+            json=payload,
             timeout=120,
         )
         r.raise_for_status()
@@ -689,29 +915,91 @@ def chat():
     t_start = time.time()
     data = request.get_json(force=True)
     user_msg = data.get("message", data.get("content", ""))
-    system = data.get("system", "")
+    system = data.get("system", NX_SYSTEM_PROMPT)
     stream = data.get("stream", True)
     messages = data.get("messages")
 
+    # Session / conversation context
+    session_id = data.get("session_id") or data.get("session", "") or f"rest:{request.remote_addr}"
+    conv_history = conversation.get(session_id) if not messages else messages
+    conversation.add(session_id, "user", user_msg)
+
     timing: dict = {}
+    
+    cached = cache.lookup(user_msg)
+    if cached:
+        cached_resp, cached_reason = cached
+        t_end = time.time()
+        timing["cached"] = True
+        timing["classify_ms"] = 0
+        timing["inference_ms"] = 0
+        timing["total_ms"] = (t_end - t_start) * 1000
+        timing["route"] = "AGX"
+        timing["response_len"] = len(cached_resp)
+        log.info(f"Cache HIT — returning cached AGX response for {user_msg[:60]!r}")
+
+        conversation.add(session_id, "assistant", cached_resp.strip())
+        route_reason = cached_reason
+        if not stream:
+            return jsonify({
+                "content": cached_resp.strip(),
+                "source": "AGX",
+                "session_id": session_id,
+                "cached": True,
+                "route_reason": cached_reason,
+                "timing_ms": timing,
+            })
+        def gen_cached():
+            for i in range(0, len(cached_resp), 80):
+                yield f"data: {json.dumps({'token': cached_resp[i:i+80], 'source': 'AGX'})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'source': 'AGX', 'content': cached_resp.strip(), 'session_id': session_id, 'cached': True, 'route_reason': cached_reason})}\n\n"
+        return Response(gen_cached(), mimetype="text/event-stream")
+
     result = enqueue_classify(user_msg, timing=timing)
     is_med = result["is_medical"]
     conf = result["confidence"]
     route_agx = not (is_med and conf >= CONFIDENCE_THRESHOLD)
+    kw_count = result.get("kw_count", 0)
+
+    # Build why-reason for the routing decision
+    if route_agx:
+        if not is_med:
+            route_reason = "not medical"
+        elif conf < CONFIDENCE_THRESHOLD:
+            route_reason = f"low confidence ({conf:.2f} < {CONFIDENCE_THRESHOLD})"
+        else:
+            route_reason = "unknown"
+    else:
+        route_reason = f"medical (c={conf:.2f} >= {CONFIDENCE_THRESHOLD})"
 
     log.info(
         f"Query: {user_msg[:60]!r}  "
         f"is_med={is_med}  c={conf:.3f}  "
         f"kl={result.get('kl_div', 0):.2f}  "
         f"kmeans={result.get('kmeans', {}).get('label', '?')}  "
-        f"route={'AGX' if route_agx else 'NX'}"
+        f"route={'AGX' if route_agx else 'NX'}  "
+        f"reason={route_reason}"
     )
 
+    perf.record(kw_count, result.get("p_med", 0), conf,
+                result.get("kl_div", 0), result.get("method", "?"),
+                "AGX" if route_agx else "NX")
+
     if route_agx:
-        full = fetch_from_agx(user_msg)
+        full = fetch_from_agx(user_msg, conv_history)
+        if full and not full.startswith("["):
+            cache.store(user_msg, full, route_reason)
+            trig = perf.check_trigger()
+            if trig["trigger"]:
+                log.info(f"Performance degraded (recall={trig['recall']}, acc={trig['accuracy']}) — launching retrain")
+                threading.Thread(target=_retrain_from_cache, daemon=True).start()
+        if full:
+            conversation.add(session_id, "assistant", full.strip())
     else:
-        prompt = build_prompt(user_msg, system, messages)
+        prompt = build_prompt(user_msg, system, conv_history)
         full = enqueue_infer(prompt)
+        if full:
+            conversation.add(session_id, "assistant", full.strip())
 
     t_end = time.time()
     timing["inference_ms"] = (
@@ -728,7 +1016,8 @@ def chat():
         f"infer={timing['inference_ms']:.0f}ms  "
         f"total={timing['total_ms']:.0f}ms  "
         f"route={timing['route']}  "
-        f"resp={timing['response_len']}chars"
+        f"resp={timing['response_len']}chars  "
+        f"reason={route_reason}"
     )
 
     log_to_agx({
@@ -741,6 +1030,8 @@ def chat():
         "kmeans": result.get("kmeans"),
         "confidence_threshold": CONFIDENCE_THRESHOLD,
         "routed_to": "AGX" if route_agx else "NX",
+        "route_reason": route_reason,
+        "kw_count": kw_count,
         "timing_ms": timing,
     })
 
@@ -750,11 +1041,14 @@ def chat():
         return jsonify({
             "content": full.strip(),
             "source": source,
+            "session_id": session_id,
+            "cached": timing.get("cached", False),
             "timing_ms": timing,
             "confidence": conf,
             "p_med": result.get("p_med"),
             "kl_div": result.get("kl_div"),
             "kmeans_label": (result.get("kmeans") or {}).get("label"),
+            "route_reason": route_reason,
         })
 
     def generate():
@@ -762,6 +1056,8 @@ def chat():
             yield f"data: {json.dumps({'token': full[i:i+80], 'source': source})}\n\n"
         done = {
             "done": True, "source": source, "content": full.strip(),
+            "session_id": session_id,
+            "cached": timing.get("cached", False),
             "timing_ms": timing, "confidence": conf,
             "p_med": result.get("p_med"), "kl_div": result.get("kl_div"),
             "kmeans_label": (result.get("kmeans") or {}).get("label"),
@@ -791,29 +1087,75 @@ def ws_chat(ws):
             continue
 
         user_msg = data.get("content", "")
-        system = data.get("system", "")
+        system = data.get("system", NX_SYSTEM_PROMPT)
         messages = data.get("messages")
+        session_id = data.get("session_id") or data.get("session", "") or f"ws:{id(ws)}"
+        conv_history = conversation.get(session_id) if not messages else messages
+        conversation.add(session_id, "user", user_msg)
 
         ws_start = time.time()
         timing: dict = {}
+
+        cached = cache.lookup(user_msg)
+        if cached:
+            cached_resp, cached_reason = cached
+            timing["cached"] = True
+            timing["classify_ms"] = 0
+            timing["inference_ms"] = 0
+            timing["total_ms"] = (time.time() - ws_start) * 1000
+            timing["route"] = "AGX"
+            timing["response_len"] = len(cached_resp)
+            log.info(f"Cache HIT — returning cached AGX response for {user_msg[:60]!r}")
+            conversation.add(session_id, "assistant", cached_resp.strip())
+            for i in range(0, len(cached_resp), 80):
+                ws.send(json.dumps({"type": "chunk", "content": cached_resp[i:i+80], "source": "AGX"}))
+            ws.send(json.dumps({"type": "done", "content": cached_resp.strip(), "source": "AGX", "cached": True, "session_id": session_id, "route_reason": cached_reason, "timing_ms": timing}))
+            continue
+
         result = enqueue_classify(user_msg, timing=timing)
         is_med = result["is_medical"]
         conf = result["confidence"]
         route_agx = not (is_med and conf >= CONFIDENCE_THRESHOLD)
+        kw_count = result.get("kw_count", 0)
+
+        if route_agx:
+            if not is_med:
+                route_reason = "not medical"
+            elif conf < CONFIDENCE_THRESHOLD:
+                route_reason = f"low confidence ({conf:.2f} < {CONFIDENCE_THRESHOLD})"
+            else:
+                route_reason = "unknown"
+        else:
+            route_reason = f"medical (c={conf:.2f} >= {CONFIDENCE_THRESHOLD})"
 
         log.info(
             f"Query: {user_msg[:60]!r}  "
             f"is_med={is_med}  c={conf:.3f}  "
             f"kl={result.get('kl_div', 0):.2f}  "
-        f"kmeans={(result.get('kmeans') or {}).get('label', '?')}  "
-            f"route={'AGX' if route_agx else 'NX'}"
+            f"kmeans={(result.get('kmeans') or {}).get('label', '?')}  "
+            f"route={'AGX' if route_agx else 'NX'}  "
+            f"reason={route_reason}"
         )
 
+        perf.record(kw_count, result.get("p_med", 0), conf,
+                    result.get("kl_div", 0), result.get("method", "?"),
+                    "AGX" if route_agx else "NX")
+
         if route_agx:
-            full = fetch_from_agx(user_msg)
+            full = fetch_from_agx(user_msg, conv_history)
+            if full and not full.startswith("["):
+                cache.store(user_msg, full, route_reason)
+                trig = perf.check_trigger()
+                if trig["trigger"]:
+                    log.info(f"Performance degraded (recall={trig['recall']}, acc={trig['accuracy']}) — launching retrain")
+                    threading.Thread(target=_retrain_from_cache, daemon=True).start()
+            if full:
+                conversation.add(session_id, "assistant", full.strip())
         else:
-            prompt = build_prompt(user_msg, system, messages)
+            prompt = build_prompt(user_msg, system, conv_history)
             full = enqueue_infer(prompt)
+            if full:
+                conversation.add(session_id, "assistant", full.strip())
 
         ws_end = time.time()
         timing["inference_ms"] = (
@@ -830,7 +1172,8 @@ def ws_chat(ws):
             f"infer={timing['inference_ms']:.0f}ms  "
             f"total={timing['total_ms']:.0f}ms  "
             f"route={timing['route']}  "
-            f"resp={timing['response_len']}chars"
+            f"resp={timing['response_len']}chars  "
+            f"reason={route_reason}"
         )
 
         log_to_agx({
@@ -843,6 +1186,8 @@ def ws_chat(ws):
             "kmeans": result.get("kmeans"),
             "confidence_threshold": CONFIDENCE_THRESHOLD,
             "routed_to": "AGX" if route_agx else "NX",
+            "route_reason": route_reason,
+            "kw_count": kw_count,
             "timing_ms": timing,
         })
 
@@ -854,12 +1199,79 @@ def ws_chat(ws):
             "type": "done",
             "content": full.strip(),
             "source": source,
+            "cached": timing.get("cached", False),
             "timing_ms": timing,
             "confidence": conf,
             "p_med": result.get("p_med"),
             "kl_div": result.get("kl_div"),
             "kmeans_label": (result.get("kmeans") or {}).get("label"),
+            "route_reason": route_reason,
+            "session_id": session_id,
         }))
+
+
+# ── Cache inspection endpoint ──────────────────────────────────────
+
+@app.route("/cache")
+def cache_status():
+    return jsonify({
+        "total_cached": cache.size(),
+        "training_triggered": cache.data.get("training_triggered", False),
+        "retrain_threshold": cache.data.get("retrain_threshold", RETRAIN_THRESHOLD),
+        "path": CACHE_PATH,
+    })
+
+
+# ── History endpoint ───────────────────────────────────────────────
+
+@app.route("/history", methods=["GET", "DELETE"])
+def history_endpoint():
+    session_id = request.args.get("session_id", "")
+    if request.method == "DELETE":
+        conversation.clear(session_id)
+        return jsonify({"cleared": True, "session_id": session_id})
+    hist = conversation.get(session_id)
+    return jsonify({
+        "session_id": session_id,
+        "exchanges": len(hist) // 2,
+        "messages": hist[-6:],  # last 3 exchanges
+    })
+
+
+# ── Performance endpoint ───────────────────────────────────────────
+
+@app.route("/performance")
+def performance_status():
+    return jsonify(perf.summary())
+
+
+# ── Retrain from cache ─────────────────────────────────────────────
+
+def _retrain_from_cache():
+    """Launch retraining in a subprocess using cached AGX responses."""
+    script = os.path.join(_BASE, "retrain_from_cache.py")
+    if not os.path.exists(script):
+        log.error(f"Retrain script not found: {script}")
+        return
+    data = cache.get_training_data()
+    if len(data) < 10:
+        log.warning(f"Too few cached items ({len(data)}) for retraining, skipping")
+        return
+    log.info(f"Starting retrain on {len(data)} cached items...")
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, script, "--cache", CACHE_PATH],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        for line in proc.stdout:
+            log.info(f"[retrain] {line.rstrip()}")
+        proc.wait()
+        if proc.returncode == 0:
+            log.info("Retrain completed successfully")
+        else:
+            log.error(f"Retrain failed with code {proc.returncode}")
+    except Exception as e:
+        log.error(f"Retrain launch failed: {e}")
 
 
 # ── Main ─────────────────────────────────────────────────────────────
@@ -892,6 +1304,10 @@ if __name__ == "__main__":
     print(f"  Confidence: >= {CONFIDENCE_THRESHOLD} → NX,  < {CONFIDENCE_THRESHOLD} → AGX")
     print(f"  Model q:    {{classify, infer}} (serialised)")
     print(f"  Classifier: multi-sample ({N_SAMPLES}x) + KL divergence + online k-means")
+    print(f"  Cache:      {cache.size()} queries (retrain @ {RETRAIN_THRESHOLD})")
+    print(f"  Cache file: {CACHE_PATH}")
+    print(f"  Perf mon:   window={PERF_WINDOW} recall≥{RETRAIN_RECALL_THRESHOLD} acc≥{RETRAIN_ACCURACY_THRESHOLD}")
+    print(f"  Perf check: every {PERF_CHECK_INTERVAL} classifications")
     print()
 
     app.run(host=args.host, port=args.port, threaded=True)
